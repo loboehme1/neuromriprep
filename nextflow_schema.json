@@ -43,8 +43,6 @@
                 }
             }
         },
-
-
         "institutional_config_options": {
             "title": "Institutional config options",
             "type": "object",
@@ -171,7 +169,6 @@
                 "validate_params": {
                     "type": "boolean",
                     "description": "Boolean whether to validate parameters against the schema at runtime",
-                    "default": true,
                     "fa_icon": "fas fa-check-square",
                     "hidden": true
                 },
@@ -196,13 +193,39 @@
             "$ref": "#/$defs/input_output_options"
         },
         {
-            "$ref": "#/$defs/reference_genome_options"
-        },
-        {
             "$ref": "#/$defs/institutional_config_options"
         },
         {
             "$ref": "#/$defs/generic_options"
         }
-    ]
+    ],
+    "properties": {
+        "bids_dir": {
+            "type": "string"
+        },
+        "config": {
+            "type": "string"
+        },
+        "fs_license": {
+            "type": "string"
+        },
+        "run_dcm2bids": {
+            "type": "boolean"
+        },
+        "run_bidsvalidator": {
+            "type": "boolean"
+        },
+        "run_pydeface": {
+            "type": "boolean"
+        },
+        "run_mriqc": {
+            "type": "boolean"
+        },
+        "run_fmriprep": {
+            "type": "boolean"
+        },
+        "run_complete": {
+            "type": "boolean"
+        }
+    }
 }

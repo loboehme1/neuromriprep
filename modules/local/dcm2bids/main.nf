@@ -52,7 +52,7 @@ process DCM2BIDS {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         dcm2bids: "\$(dcm2bids --version 2>&1 | sed 's/dcm2bids //g')"
-        
+
     END_VERSIONS
     """
 
