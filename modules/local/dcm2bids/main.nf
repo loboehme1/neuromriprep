@@ -15,59 +15,113 @@
 // TODO nf-core: Optional inputs are not currently supported by Nextflow. However, using an empty
 //               list (`[]`) instead of a file can be used to work around this issue.
 
+
+
 process DCM2BIDS {
-    tag "$meta.id"
+    tag "sub-${subject}_ses-${session_id}"
     label 'process_single'
 
+    // Use public dcm2bids container with option for local override via task.ext.container
+    // change to own container
+    APPTAINER_IMG = "/nic/sw/IRTG/sif/dcm2bids_3.2.0.sif"
 
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://unfmontreal/dcm2bids:3.1.0':
-        'unfmontreal/dcm2bids:3.1.0' }"
+    if( !file(APPTAINER_IMG).exists() ) {
+        exit 1, "ERROR: $APPTAINER_IMG not found!"
+    }
+
+    container "${ task.ext.container ?: APPTAINER_IMG }"
+
 
     input:
-    tuple val(meta), path(dicom_dir)
-    path config_file
+    val  subject              // Subject identifier (e.g., "001")
+    val  session_id           // Session label (e.g., "01")
+    path dicom_dir            // DICOM directory for this subject/session
+    path config_file          // Session-specific dcm2bids config JSON
+    val  force_reprocessing   // Boolean flag for --force_dcm2bids
 
     output:
-    val(meta)
-    path("bids_output/**")                  , emit: bids_files
-    path "versions.yml"                     , emit: versions
+    path "bids_output/sub-${subject}/ses-${session_id}", emit: bids_output
+    path "*.log"                                       , emit: log
+    path "versions.yml"                                , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    def force_flag = force_reprocessing ? '--force_dcm2bids' : ''
+    def prefix = "sub-${subject}_ses-${session_id}"
+
     """
+    # Debug: List files to verify staging
+    ls -la
+
+    # Create output directory
     mkdir -p bids_output
 
+    # Run dcm2bids
     dcm2bids \\
+        -p ${subject} \\
+        -s ${session_id} \\
+        -c ${config_file.name} \\
+        -d ${dicom_dir.name} \\
         -o bids_output \\
-        -d ${dicom_dir} \\
-        -c ${config_file} \\
-        -p ${meta.id} \\
-        $args
+        ${force_flag} ${args} 2>&1 | tee ${prefix}_dcm2bids.log
 
+    # Post-processing: Remove AcquisitionDuration from BOLD JSON files
+    # This ensures BIDS compliance by eliminating conflicts with RepetitionTime/SliceTiming
+    bold_jsons=\$(find bids_output/sub-${subject}/ses-${session_id} -name "*_bold.json" 2>/dev/null || true)
+
+    if [ -n "\${bold_jsons}" ]; then
+        for json_file in \${bold_jsons}; do
+            if [ -f "\${json_file}" ]; then
+                # Remove AcquisitionDuration field using Python (more portable than jq)
+                python3 <<EOF
+
+import json
+import sys
+
+try:
+    with open("\${json_file}", 'r') as f:
+        data = json.load(f)
+
+    # Remove AcquisitionDuration if present
+    if 'AcquisitionDuration' in data:
+        del data['AcquisitionDuration']
+        with open("\${json_file}", 'w') as f:
+            json.dump(data, f, indent=2)
+        print(f"Removed AcquisitionDuration from \${json_file}", file=sys.stderr)
+except Exception as e:
+    print(f"Warning: Failed to process \${json_file}: {e}", file=sys.stderr)
+EOF
+            fi
+        done
+    fi
+
+    # Clean up temporary dcm2bids directory
+    rm -rf bids_output/tmp_dcm2bids
+
+    # Generate versions file
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        dcm2bids: "\$(dcm2bids --version 2>&1 | sed 's/dcm2bids //g')"
-
+        dcm2bids: \$(dcm2bids --version 2>&1 | grep -oP 'dcm2bids \\K[0-9.]+' || echo "unknown")
     END_VERSIONS
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    def prefix = "sub-${subject}_ses-${session}"
     """
-    mkdir -p bids_output/sub-${meta.id}/ses-${meta.session_id}
-    touch bids_output/sub-${meta.id}/ses-${meta.session_id}/sub-${meta.id}_ses-${meta.session_id}_T1w.nii.gz
-    touch bids_output/sub-${meta.id}/ses-${meta.session_id}/sub-${meta.id}_ses-${meta.session_id}_T2w.nii.gz
-    touch bids_output/dataset_description.json
-    touch bids_output/participants.tsv
+    mkdir -p bids_output/sub-${subject}/ses-${session}/anat
+    mkdir -p bids_output/sub-${subject}/ses-${session}/func
+    mkdir -p bids_output/sub-${subject}/ses-${session}/fmap
+
+    touch bids_output/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_T1w.nii.gz
+    touch bids_output/sub-${subject}/ses-${session}/func/sub-${subject}_ses-${session}_task-rest_bold.nii.gz
+    touch ${prefix}_dcm2bids.log
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        dcm2bids: 3.1.0
+        dcm2bids: 3.2.0
     END_VERSIONS
     """
 }
