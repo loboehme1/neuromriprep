@@ -3,16 +3,16 @@
     IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { DCM2BIDS               } from '../modules/local/dcm2bids'
-include { BIDSVALIDATOR          } from '../modules/local/bidsvalidator'
-include { MRIQC                  } from '../modules/local/mriqc'
-include { FMRIPREP               } from '../modules/local/fmriprep'
-include { PYDEFACE               } from '../modules/local/pydeface'
+
+//params.input       = params.input ?: ''      // e.g. "/data/dicoms/*/"
+//params.outdir_copy = params.outdir_copy ?: null
+
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_neuromriprep_pipeline'
 include { MULTIQC                } from '../modules/nf-core/multiqc'
+include { COPYDICOMS             } from '../modules/local/copydicoms'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -22,91 +22,40 @@ include { MULTIQC                } from '../modules/nf-core/multiqc'
 
 workflow NEUROMRIPREP {
 
+    /*
     take:
     ch_input_dirs // channel: [ val(meta), path(input_dir) ]
     ch_config     // channel: path(config_file)
+    */
+    
 
 
     main:
 
     ch_versions = Channel.empty()
-    ch_input_dirs = Channel.fromPath(params.input_dirs, type: 'dir')
+    ch_input_dirs = Channel.fromPath(params.input, type: 'dir')
         .map { dir ->
             def meta = [id: dir.name]
             [meta, dir]
         }
 
-    ch_config = Channel.fromPath(params.config)
+    //ch_config = params.config ? Channel.fromPath(params.config) : Channel.empty()
     //ch_fs_license = Channel.fromPath(params.fs_license)
 
-    // Run workflow based on parameter input values
-    if (params.run_dcm2bids) {
-        DCM2BIDS(ch_input_dirs, ch_config)
-        ch_versions = ch_versions.mix(DCM2BIDS.out.versions)
-    }
-    if (params.run_bidsvalidator) {
-        ch_bids_dir = Channel.fromPath("${params.bids_dir}")
+    //
+    // MODULE: copydicoms
+    //
 
-        BIDSVALIDATOR(ch_bids_dir)
-        ch_versions = ch_versions.mix(BIDSVALIDATOR.out.versions)
-    }
-    if (params.run_pydeface) {
-        ch_anat_files = Channel.fromPath("${params.bids_dir}/**/*.nii.gz")
-            .filter { it.toString().contains("/anat/") }
-            .map { file ->
-                def meta = [id: file.parent.name]
-                [meta, file]
-            }
-        PYDEFACE(ch_anat_files)
-        ch_versions = ch_versions.mix(PYDEFACE.out.versions)
-    }
-    if (params.run_mriqc) {
-        ch_bids_dir = Channel.fromPath("${params.bids_dir}")
+    COPYDICOMS (
+        ch_input_dirs
+    )
 
-        MRIQC(ch_bids_dir)
-        ch_versions = ch_versions.mix(MRIQC.out.versions)
-    }
-    if (params.run_fmriprep) {
-        ch_bids_dir = Channel.fromPath("${params.bids_dir}")
-        ch_fs_license = Channel.fromPath("${params.fs_license}")
+    ch_multiqc_files = Channel.empty()
+    multiqc_report = Channel.empty()
 
-        FMRIPREP(ch_bids_dir, ch_fs_license)
-
-        ch_versions = ch_versions.mix(FMRIPREP.out.versions)
-    }
-    if (params.run_complete) {
-        ch_fs_license = Channel.fromPath("${params.fs_license}")
-
-
-        // Step 1: Convert DICOM to BIDS
-        DCM2BIDS (ch_input_dirs, ch_config)
-        ch_bids_dir = DCM2BIDS.out.bids_files
-
-        // Step 2: Validate BIDS data
-        BIDSVALIDATOR (ch_bids_dir)
-
-        ch_anat_files = DCM2BIDS.out.bids_files
-        .map { meta, files ->
-            def anat_files = files.findAll { it.toString().contains("/anat/") && it.name.endsWith(".nii.gz") }
-            return [ meta, anat_files ]
-        }
-        .transpose()
-
-        // Step 3: Deface anatomical images
-        PYDEFACE(ch_anat_files)
-
-        // Step 4: Run MRIQC
-        MRIQC (ch_bids_dir)
-
-        // Step 5: Run fMRIPrep
-        FMRIPREP (ch_bids_dir, ch_fs_license)
-
-        ch_versions = ch_versions.mix(DCM2BIDS.out.versions)
-        ch_versions = ch_versions.mix(BIDSVALIDATOR.out.versions)
-        ch_versions = ch_versions.mix(PYDEFACE.out.versions)
-        ch_versions = ch_versions.mix(MRIQC.out.versions)
-        ch_versions = ch_versions.mix(FMRIPREP.out.versions)
-    }
+    
+    
+    
 
 
     softwareVersionsToYAML(ch_versions)
@@ -121,6 +70,7 @@ workflow NEUROMRIPREP {
     //
     // MODULE: MultiQC
     //
+    /*
     ch_multiqc_config        = Channel.fromPath(
         "$projectDir/assets/multiqc_config.yml", checkIfExists: true)
     ch_multiqc_custom_config = params.multiqc_config ?
@@ -148,6 +98,14 @@ workflow NEUROMRIPREP {
             sort: true
         )
     )
+    */
+    // (optional) versions into MultiQC bundle later
+    ch_versions = ch_versions.mix( COPYDICOMS.out.versions )
+
+    // --- MultiQC scaffold (kept minimal for now) ---
+    ch_multiqc_config        = Channel.fromPath("$projectDir/assets/multiqc_config.yml", checkIfExists: true)
+    ch_multiqc_custom_config = Channel.empty()
+    ch_multiqc_logo          = Channel.empty()
 
     MULTIQC (
         ch_multiqc_files.collect(),
@@ -159,13 +117,18 @@ workflow NEUROMRIPREP {
     )
 
     emit:
+    copied_dicoms  = COPYDICOMS.out.dicoms          // <- directory you want
+    versions       = COPYDICOMS.out.versions        // <- if you keep versions.yml
+    multiqc_report = MULTIQC.out.report.toList()
+    /*
+    emit:
     multiqc_report  = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions        = ch_versions                 // channel: [ path(versions.yml) ]
     bids_files      = params.run_dcm2bids || params.run_complete ? DCM2BIDS.out.bids_files : Channel.empty()
     defaced_images  = params.run_pydeface || params.run_complete ? PYDEFACE.out.defaced_image : Channel.empty()
     mriqc_output    = params.run_mriqc || params.run_complete ? MRIQC.out.mriqc_output : Channel.empty()
     fmriprep_output = params.run_fmriprep || params.run_complete ? FMRIPREP.out.fmriprep_output : Channel.empty()
-
+    */
 }
 
 /*
