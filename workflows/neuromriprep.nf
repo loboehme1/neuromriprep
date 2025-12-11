@@ -4,7 +4,8 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { DCM2BIDS               } from '../modules/local/dcm2bids'
-include { DCM2BIDSCONFIG   } from '../modules/local/dcm2bidsconfig'
+include { DCM2BIDS_CONFIG   } from '../modules/local/dcm2bidsconfig'
+include { DCM2BIDS_POSTPROC } from '../modules/local/dcm2bidspostprocess'
 /*
 include { BIDSVALIDATOR          } from '../modules/local/bidsvalidator'
 include { MRIQC                  } from '../modules/local/mriqc'
@@ -61,7 +62,7 @@ workflow NEUROMRIPREP {
         }
 
 
-    // prepare config input for DCM2BIDSCONFIG
+    // prepare config input for DCM2BIDS_CONFIG
     ch_cfg_in = ch_input
         .combine(ch_config)
         .map { meta, dicom_dir, config_file ->
@@ -69,12 +70,12 @@ workflow NEUROMRIPREP {
         }
 
 
-    // Call dcm2bidsconfig
+    // Call dcm2bids_config
 
-    DCM2BIDSCONFIG(ch_cfg_in)
+    DCM2BIDS_CONFIG(ch_cfg_in)
 
     // output
-    ch_modified_cfg = DCM2BIDSCONFIG.out.config
+    ch_modified_cfg = DCM2BIDS_CONFIG.out.config
 
 
 
@@ -94,15 +95,41 @@ workflow NEUROMRIPREP {
     ch_force = Channel.value( params.force_dcm2bids ?: false )
 
 
+    // call dcm2bids
+
     DCM2BIDS(
         ch_run_in,
         ch_force
     )
 
-    
     // output
-    //ch_bids_raw = DCM2BIDS.out.bids_output
+    ch_bids_raw = DCM2BIDS.out.bids_output
     ch_versions = DCM2BIDS.out.versions
+
+    ch_bids_raw.view { bids_dir ->
+        log.info "[DEBUG] ch_bids_raw item: ${bids_dir} (name=${bids_dir.name})"
+        // or just: "[DEBUG] ch_bids_raw: ${bids_dir}"
+    }
+
+
+
+
+
+    // postprocessing
+
+    DCM2BIDS_POSTPROC(ch_bids_raw)
+
+
+    // output
+
+    postproc_out = DCM2BIDS_POSTPROC.out.bids_post
+    derivatives = DCM2BIDS_POSTPROC.out.derivatives
+
+    postproc_out.view { bids_dir ->
+        log.info "[DEBUG] ch_bids_raw item: ${bids_dir} (name=${bids_dir.name})"
+        // or just: "[DEBUG] ch_bids_raw: ${bids_dir}"
+    }
+
 
 
 
@@ -112,7 +139,8 @@ workflow NEUROMRIPREP {
     //bids_output = DCM2BIDS_POSTPROC.out.bids_post
     // derivatives created by post-processing (ADC)
     //derivatives = DCM2BIDS_POSTPROC.out.derivatives
-    bids_output = DCM2BIDS.out.bids_output
+    bids_output = postproc_out
+    derivatives = derivatives
     versions    = ch_versions
 }
 

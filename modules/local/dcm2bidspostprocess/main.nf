@@ -15,68 +15,109 @@
 // TODO nf-core: Optional inputs are not currently supported by Nextflow. However, using an empty
 //               list (`[]`) instead of a file can be used to work around this issue.
 
-process DCM2BIDSPOSTPROCESS {
-    tag '$bam'
+process DCM2BIDS_POSTPROC {
+
     label 'process_single'
 
-    // TODO nf-core: See section in main README for further information regarding finding and adding container addresses to the section below.
-    conda "${moduleDir}/environment.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/YOUR-TOOL-HERE':
-        'biocontainers/YOUR-TOOL-HERE' }"
+    //container "${ task.ext.container ?: '/nic/sw/IRTG/sif/dcm2bids_3.2.0.sif' }"
 
-    input:// TODO nf-core: Where applicable all sample-specific information e.g. "id", "single_end", "read_group"
-    //               MUST be provided as an input via a Groovy Map called "meta".
-    //               This information may not be required in some instances e.g. indexing reference genome files:
-    //               https://github.com/nf-core/modules/blob/master/modules/nf-core/bwa/index/main.nf
-    // TODO nf-core: Where applicable please provide/convert compressed files as input/output
-    //               e.g. "*.fastq.gz" and NOT "*.fastq", "*.bam" and NOT "*.sam" etc.
-    path bam
+    input:
+    tuple val(meta), path(bids_dir)
 
     output:
-    // TODO nf-core: Named file extensions MUST be emitted for ALL output channels
-    path "*.bam", emit: bam
-    // TODO nf-core: List additional required output channels/values here
-    // TODO nf-core: Update the command here to obtain the version number of the software used in this module
-    // TODO nf-core: If multiple software packages are used in this module, all MUST be added here
-    //               by copying the line below and replacing the current tool with the extra tool(s)
-    tuple val("${task.process}"), val('dcm2bidspostprocess'), eval("dcm2bidspostprocess --version"), topic: versions, emit: versions_dcm2bidspostprocess
-
-    when:
-    task.ext.when == null || task.ext.when
+    tuple val(meta), path("sub-${meta.subject}/ses-${meta.session}"), emit: bids_post
+    path "derivatives/dwi_ADC/sub-${meta.subject}/ses-${meta.session}", emit: derivatives
 
     script:
-    def args = task.ext.args ?: ''
-    
-    // TODO nf-core: Where possible, a command MUST be provided to obtain the version number of the software e.g. 1.10
-    //               If the software is unable to output a version number on the command-line then it can be manually specified
-    //               e.g. https://github.com/nf-core/modules/blob/master/modules/nf-core/homer/annotatepeaks/main.nf
-    //               Each software used MUST provide the software name and version number in the YAML version file (versions.yml)
-    // TODO nf-core: It MUST be possible to pass additional parameters to the tool as a command-line string via the "task.ext.args" directive
-    // TODO nf-core: If the tool supports multi-threading then you MUST provide the appropriate parameter
-    //               using the Nextflow "task" variable e.g. "--threads $task.cpus"
-    // TODO nf-core: Please replace the example samtools command below with your module's command
-    // TODO nf-core: Please indent the command appropriately (4 spaces!!) to help with readability ;)
+    // Groovy-side helpers
+    def subject  = meta.subject
+    def session  = meta.session
+    def bidsName = bids_dir.getName()   // staged dir name, e.g. "ses-01"
+
     """
-    dcm2bidspostprocess \\
-        $args \\
-        -@ $task.cpus \\
-        $bam
+    # ------------------------------------------------------------------
+    # 0) Ensure final BIDS folder structure: sub-<subject>/ses-<session>
+    # ------------------------------------------------------------------
+    final_bids_dir="sub-${subject}/ses-${session}"
+    orig_bids_dir="${bidsName}"
+
+    mkdir -p "sub-${subject}"
+
+    if [ "\${orig_bids_dir}" != "\${final_bids_dir}" ]; then
+        mv "\${orig_bids_dir}" "\${final_bids_dir}"
+    fi
+
+    # ------------------------------------------------------------------
+    # 1) Remove Acquisitionduration from all *_bold.json
+    # ------------------------------------------------------------------
+    bold_jsons=\$(find "\${final_bids_dir}" -type f -name "*_bold.json" 2>/dev/null || true)
+
+    if [ -n "\${bold_jsons}" ]; then
+        for json_file in \${bold_jsons}; do
+            if [ -f "\${json_file}" ]; then
+                if jq "del(.Acquisitionduration)" "\${json_file}" > "\${json_file}.tmp" && mv "\${json_file}.tmp" "\${json_file}"; then
+                    :
+                else
+                    echo "Warning: failed to update \${json_file}" >&2
+                fi
+            fi
+        done
+    fi
+
+    # ------------------------------------------------------------------
+    # 2) Handle ADC derivatives (anat, dwi, fmap, func)
+    # ------------------------------------------------------------------
+    derivatives_dwi_adc="derivatives/dwi_ADC/sub-${subject}/ses-${session}"
+    mkdir -p "\${derivatives_dwi_adc}"
+
+    # build list of search roots explicitly
+    search_dirs=""
+    for d in anat dwi fmap func; do
+        if [ -d "\${final_bids_dir}/\${d}" ]; then
+            search_dirs="\${search_dirs} \${final_bids_dir}/\${d}"
+        fi
+    done
+
+    adc_files=\$(
+        for root in \${search_dirs}; do
+            if [ -d "\${root}" ]; then
+                find "\${root}" -type f -iname "*adc*" -print 2>/dev/null || true
+            fi
+        done
+    )
+
+    if [ -n "\${adc_files}" ]; then
+        while IFS= read -r f; do
+            [ -f "\${f}" ] || continue
+            mv "\${f}" "\${derivatives_dwi_adc}/"
+        done << EOF
+\${adc_files}
+EOF
+    fi
+
+    # ------------------------------------------------------------------
+    # 3) Remove sbref.bval / sbref.bvec (only in dwi/)
+    # ------------------------------------------------------------------
+    dwi_dir=\$(find "\${final_bids_dir}/dwi" -type d -name "dwi" | head -n1 || true)
+
+    if [ -n "\${dwi_dir}" ]; then
+        sbref_files=\$(find "\${dwi_dir}" -type f \\( -name "*sbref.bval" -o -name "*sbref.bvec" \\) -print 2>/dev/null || true)
+        if [ -n "\${sbref_files}" ]; then
+            rm \${sbref_files} 2>/dev/null || true
+        fi
+    fi
+
+    # ------------------------------------------------------------------
+    # 4) Remove tmp_dcm2bids if present
+    # ------------------------------------------------------------------
+    rm -rf tmp_dcm2bids || true
     """
 
     stub:
-    def args = task.ext.args ?: ''
-    
-    // TODO nf-core: A stub section should mimic the execution of the original module as best as possible
-    //               Have a look at the following examples:
-    //               Simple example: https://github.com/nf-core/modules/blob/818474a292b4860ae8ff88e149fbcda68814114d/modules/nf-core/bcftools/annotate/main.nf#L47-L63
-    //               Complex example: https://github.com/nf-core/modules/blob/818474a292b4860ae8ff88e149fbcda68814114d/modules/nf-core/bedtools/split/main.nf#L38-L54
-    // TODO nf-core: If the module doesn't use arguments ($args), you SHOULD remove:
-    //               - The definition of args `def args = task.ext.args ?: ''` above.
-    //               - The use of the variable in the script `echo $args ` below.
     """
-    echo $args
-    
-    touch ${prefix}.bam
+    mkdir -p "sub-${meta.subject}/ses-${meta.session}"
+    mkdir -p "derivatives/dwi_ADC/sub-${meta.subject}/ses-${meta.session}"
     """
 }
+
+

@@ -29,7 +29,7 @@ process DCM2BIDS {
     val  force_reprocessing
 
     output:
-    path "sub-${meta.subject}/ses-${meta.session}" , emit: bids_output
+    tuple val(meta), path("sub-${meta.subject}/ses-${meta.session}") , emit: bids_output
     path "*.log"                                   , emit: log
     path "versions.yml"                            , emit: versions
 

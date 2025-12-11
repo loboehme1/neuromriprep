@@ -15,7 +15,7 @@
 // TODO nf-core: Optional inputs are not currently supported by Nextflow. However, using an empty
 //               list (`[]`) instead of a file can be used to work around this issue.
 
-process DCM2BIDSCONFIG{
+process DCM2BIDS_CONFIG{
 
     label 'process_single'
 
