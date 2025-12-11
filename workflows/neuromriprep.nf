@@ -4,6 +4,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { DCM2BIDS               } from '../modules/local/dcm2bids'
+include { DCM2BIDSCONFIG   } from '../modules/local/dcm2bidsconfig'
 /*
 include { BIDSVALIDATOR          } from '../modules/local/bidsvalidator'
 include { MRIQC                  } from '../modules/local/mriqc'
@@ -37,9 +38,6 @@ workflow NEUROMRIPREP {
     ch_input = ch_samplesheet
         .map { meta, dicom_dir ->
 
-            // DEBUG at the start of map
-            log.info "[DEBUG] map(): incoming meta=${meta}, dicom_dir=${dicom_dir} name=${dicom_dir?.name}"
-
             def folder_name = dicom_dir.name
             def parts       = folder_name.split('_')
 
@@ -58,36 +56,63 @@ workflow NEUROMRIPREP {
                 project: meta.project
             ]
 
-            // DEBUG after transformation
-            log.info "[DEBUG] ch_input emit: new_meta=${new_meta}, dicom_dir_name=${dicom_dir.name}"
-
-            // IMPORTANT: emit a TUPLE, not a plain list
+            // emit tuple
             tuple(new_meta, dicom_dir)
         }
 
-    // Now this .view will work because channel items are tuples
-    ch_input.view { meta, dicom_dir ->
-        log.info "[DEBUG] ch_input.view: meta=${meta}, dicom_dir=${dicom_dir} name=${dicom_dir?.name}"
-    }
 
-    //
-    // Call DCM2BIDS module
-    //
+    // prepare config input for DCM2BIDSCONFIG
+    ch_cfg_in = ch_input
+        .combine(ch_config)
+        .map { meta, dicom_dir, config_file ->
+            tuple(meta, config_file)
+        }
+
+
+    // Call dcm2bidsconfig
+
+    DCM2BIDSCONFIG(ch_cfg_in)
+
+    // output
+    ch_modified_cfg = DCM2BIDSCONFIG.out.config
+
+
+
+    // Prepare input for DCM2BIDS
+
+    ch_run_in = ch_input
+        .join(ch_modified_cfg)
+        .map { row ->
+            // row is [meta, dicom_dir, meta2, modified_config]
+            def meta            = row[0]
+            def dicom_dir       = row[1]
+            def modified_config = row[2]
+
+            tuple(meta, dicom_dir, modified_config)
+        }
+
+    ch_force = Channel.value( params.force_dcm2bids ?: false )
+
+
     DCM2BIDS(
-        ch_input,
-        ch_config,
-        params.force_dcm2bids ?: false
+        ch_run_in,
+        ch_force
     )
 
-    //
-    // Versions (optional)
-    //
+    
+    // output
+    //ch_bids_raw = DCM2BIDS.out.bids_output
     ch_versions = DCM2BIDS.out.versions
 
+
+
     emit:
+    // final, post-processed BIDS tree
+    //ch_bids_raw = DCM2BIDS.out.bids_output
+    //bids_output = DCM2BIDS_POSTPROC.out.bids_post
+    // derivatives created by post-processing (ADC)
+    //derivatives = DCM2BIDS_POSTPROC.out.derivatives
     bids_output = DCM2BIDS.out.bids_output
-    derivatives = DCM2BIDS.out.derivatives
-    //log         = DCM2BIDS.out.log
     versions    = ch_versions
 }
 

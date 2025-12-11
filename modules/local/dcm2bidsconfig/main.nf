@@ -15,69 +15,61 @@
 // TODO nf-core: Optional inputs are not currently supported by Nextflow. However, using an empty
 //               list (`[]`) instead of a file can be used to work around this issue.
 
-process DCM2BIDSCONFIG {
-    tag "$meta.id"
+process DCM2BIDSCONFIG{
+
     label 'process_single'
 
-    // TODO nf-core: See section in main README for further information regarding finding and adding container addresses to the section below.
-    conda "${moduleDir}/environment.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/YOUR-TOOL-HERE':
-        'biocontainers/YOUR-TOOL-HERE' }"
+    // Same container as before (has dcm2bids + jq)
+    //container "${ task.ext.container ?: '/nic/sw/IRTG/sif/dcm2bids_3.2.0.sif' }"
 
-    input:// TODO nf-core: Where applicable all sample-specific information e.g. "id", "single_end", "read_group"
-    //               MUST be provided as an input via a Groovy Map called "meta".
-    //               This information may not be required in some instances e.g. indexing reference genome files:
-    //               https://github.com/nf-core/modules/blob/master/modules/nf-core/bwa/index/main.nf
-    // TODO nf-core: Where applicable please provide/convert compressed files as input/output
-    //               e.g. "*.fastq.gz" and NOT "*.fastq", "*.bam" and NOT "*.sam" etc.
-    tuple val(meta), path(bam)
+    input:
+    tuple val(meta), path(config_file)
 
     output:
-    // TODO nf-core: Named file extensions MUST be emitted for ALL output channels
-    tuple val(meta), path("*.bam"), emit: bam
-    // TODO nf-core: List additional required output channels/values here
-    // TODO nf-core: Update the command here to obtain the version number of the software used in this module
-    // TODO nf-core: If multiple software packages are used in this module, all MUST be added here
-    //               by copying the line below and replacing the current tool with the extra tool(s)
-    tuple val("${task.process}"), val('dcm2bidsconfig'), eval("dcm2bidsconfig --version"), topic: versions, emit: versions_dcm2bidsconfig
+    // Emit meta again so we can join later
+    tuple val(meta), path("modified_config.json"), emit: config
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
-    // TODO nf-core: Where possible, a command MUST be provided to obtain the version number of the software e.g. 1.10
-    //               If the software is unable to output a version number on the command-line then it can be manually specified
-    //               e.g. https://github.com/nf-core/modules/blob/master/modules/nf-core/homer/annotatepeaks/main.nf
-    //               Each software used MUST provide the software name and version number in the YAML version file (versions.yml)
-    // TODO nf-core: It MUST be possible to pass additional parameters to the tool as a command-line string via the "task.ext.args" directive
-    // TODO nf-core: If the tool supports multi-threading then you MUST provide the appropriate parameter
-    //               using the Nextflow "task" variable e.g. "--threads $task.cpus"
-    // TODO nf-core: Please replace the example samtools command below with your module's command
-    // TODO nf-core: Please indent the command appropriately (4 spaces!!) to help with readability ;)
     """
-    dcm2bidsconfig \\
-        $args \\
-        -@ $task.cpus \\
-        -o ${prefix}.bam \\
-        $bam
+    echo "Creating modified config for project ${meta.project}"
+    echo "subject ${meta.subject}, session ${meta.session}"
+    ls -la
+
+    jq '.descriptions |= map(
+        if .sidecar_changes?.B0FieldIdentifier? != null
+           and (.sidecar_changes.B0FieldIdentifier | type == "string")
+           and (.sidecar_changes.B0FieldIdentifier | test("_fmap"))
+        then .sidecar_changes.B0FieldIdentifier += "_ses-${meta.session}"
+        else . end |
+        if .sidecar_changes?.B0FieldSource? != null
+           and (.sidecar_changes.B0FieldSource | type == "string")
+           and (.sidecar_changes.B0FieldSource | test("_fmap"))
+        then .sidecar_changes.B0FieldSource += "_ses-${meta.session}"
+        elif .sidecar_changes?.B0FieldSource? != null
+           and (.sidecar_changes.B0FieldSource | type == "array")
+           and (.sidecar_changes.B0FieldSource | all(. | type == "string"))
+        then .sidecar_changes.B0FieldSource |= map(
+            if . | test("_fmap")
+            then . + "_ses-${meta.session}"
+            else . end
+        )
+        else . end
+    )' ${config_file} > modified_config.json
+
+    if [ ! -s modified_config.json ]; then
+        echo "Error: Failed to create modified config file"
+        exit 1
+    fi
+
+    echo "Modified config created for ses-${meta.session}"
     """
 
     stub:
-    def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
-    // TODO nf-core: A stub section should mimic the execution of the original module as best as possible
-    //               Have a look at the following examples:
-    //               Simple example: https://github.com/nf-core/modules/blob/818474a292b4860ae8ff88e149fbcda68814114d/modules/nf-core/bcftools/annotate/main.nf#L47-L63
-    //               Complex example: https://github.com/nf-core/modules/blob/818474a292b4860ae8ff88e149fbcda68814114d/modules/nf-core/bedtools/split/main.nf#L38-L54
-    // TODO nf-core: If the module doesn't use arguments ($args), you SHOULD remove:
-    //               - The definition of args `def args = task.ext.args ?: ''` above.
-    //               - The use of the variable in the script `echo $args ` below.
     """
-    echo $args
-    
-    touch ${prefix}.bam
+    echo "STUB: creating dummy modified_config.json for sub-${meta.subject} ses-${meta.session}"
+    echo '{}' > modified_config.json
     """
 }

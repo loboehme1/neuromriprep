@@ -68,7 +68,7 @@ workflow NFCORE_NEUROMRIPREP {
     emit:
     //copied_dicoms  = NEUROMRIPREP.out.copied_dicoms
     bids_output    = NEUROMRIPREP.out.bids_output
-    derivatives    = NEUROMRIPREP.out.derivatives
+    //derivatives    = NEUROMRIPREP.out.derivatives
     //log            = NEUROMRIPREP.out.log
     versions       = NEUROMRIPREP.out.versions
     //multiqc_report = NEUROMRIPREP.out.multiqc_report
