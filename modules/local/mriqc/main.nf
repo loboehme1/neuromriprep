@@ -3,8 +3,8 @@ process MRIQC {
     label 'process_medium'
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://nipreps/mriqc:24.0.2':
-        'nipreps/mriqc:24.0.2' }"
+        'docker://nipreps/mriqc:25.0.0rc0':
+        'nipreps/mriqc:25.0.0rc0' }"
 
     input:
     tuple val(meta), path(input_dir)
@@ -35,7 +35,7 @@ process MRIQC {
         --omp-nthreads $task.cpus \\
         --mem_gb $mem_gb \\
         --no-sub \\
-        -vvv \\
+        -v \\
         --verbose-reports \\
         $args
 
@@ -54,7 +54,7 @@ process MRIQC {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        mriqc: 24.0.2
+        mriqc: 25.0.0rc0
     END_VERSIONS
     """
 }
