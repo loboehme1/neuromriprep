@@ -30,8 +30,8 @@ process DCM2BIDS {
 
     output:
     tuple val(meta), path("sub-${meta.subject}/ses-${meta.session}") , emit: bids_output
-    path "*.log"                                   , emit: log
-    path "versions.yml"                            , emit: versions
+    path "logs_dcm2bids/*.log"                                       , emit: log
+    path "versions.yml"                                              , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -46,13 +46,16 @@ process DCM2BIDS {
     echo "subject ${meta.subject}, session ${meta.session}"
     ls -la
 
+
+    mkdir -p logs_dcm2bids
+
     dcm2bids \\
         -p ${meta.subject} \\
         -s ses-${meta.session} \\
         -c ${modified_config} \\
         -d ${dicom_dir} \\
         -o . \\
-        ${force_flag} ${args} 2>&1 | tee ${prefix}_dcm2bids.log
+        ${force_flag} ${args} 2>&1 | tee logs_dcm2bids/${prefix}_dcm2bids.log
 
     # Generate versions file
     cat <<-END_VERSIONS > versions.yml
@@ -71,7 +74,10 @@ process DCM2BIDS {
 
     touch sub-${meta.subject}/ses-${meta.session}/anat/sub-${meta.subject}_ses-${meta.session}_T1w.nii.gz
     touch sub-${meta.subject}/ses-${meta.session}/func/sub-${meta.subject}_ses-${meta.session}_task-rest_bold.nii.gz
-    touch ${prefix}_dcm2bids.log
+
+    mkdir -p logs_dcm2bids
+
+    touch logs_dcm2bids/${prefix}_dcm2bids.log
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

@@ -1,40 +1,24 @@
-// TODO nf-core: If in doubt look at other nf-core/modules to see how we are doing things! :)
-//               https://github.com/nf-core/modules/tree/master/modules/nf-core/
-//               You can also ask for help via your pull request or on the #modules channel on the nf-core Slack workspace:
-//               https://nf-co.re/join
-// TODO nf-core: A module file SHOULD only define input and output files as command-line parameters.
-//               All other parameters MUST be provided using the "task.ext" directive, see here:
-//               https://www.nextflow.io/docs/latest/process.html#ext
-//               where "task.ext" is a string.
-//               Any parameters that need to be evaluated in the context of a particular sample
-//               e.g. single-end/paired-end data MUST also be defined and evaluated appropriately.
-// TODO nf-core: Software that can be piped together SHOULD be added to separate module files
-//               unless there is a run-time, storage advantage in implementing in this way
-//               e.g. it's ok to have a single module for bwa to output BAM instead of SAM:
-//                 bwa mem | samtools view -B -T ref.fasta
-// TODO nf-core: Optional inputs are not currently supported by Nextflow. However, using an empty
-//               list (`[]`) instead of a file can be used to work around this issue.
-
 process DCM2BIDS_POSTPROC {
 
     label 'process_single'
 
-    //container "${ task.ext.container ?: '/nic/sw/IRTG/sif/dcm2bids_3.2.0.sif' }"
+    container "${ task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }"
 
     input:
     tuple val(meta), path(bids_dir)
 
     output:
-    tuple val(meta), path("sub-${meta.subject}/ses-${meta.session}"), emit: bids_post
-    path "derivatives/dwi_ADC/sub-${meta.subject}/ses-${meta.session}", emit: derivatives
+    tuple val(meta), path("sub-${meta.subject}"), emit: bids_sub
+    tuple val(meta), path("derivatives/dwi_ADC/sub-${meta.subject}"), emit: derivatives
 
     script:
-    // Groovy-side helpers
     def subject  = meta.subject
     def session  = meta.session
     def bidsName = bids_dir.getName()   // staged dir name, e.g. "ses-01"
 
     """
+    set -euo pipefail
+
     # ------------------------------------------------------------------
     # 0) Ensure final BIDS folder structure: sub-<subject>/ses-<session>
     # ------------------------------------------------------------------
@@ -43,8 +27,14 @@ process DCM2BIDS_POSTPROC {
 
     mkdir -p "sub-${subject}"
 
-    if [ "\${orig_bids_dir}" != "\${final_bids_dir}" ]; then
+    if [ -d "\${orig_bids_dir}" ] && [ "\${orig_bids_dir}" != "\${final_bids_dir}" ]; then
         mv "\${orig_bids_dir}" "\${final_bids_dir}"
+    fi
+
+    # In case input already arrived as sub-<subject>/ses-<session>
+    if [ -d "sub-${subject}/ses-${session}" ] && [ ! -d "\${final_bids_dir}" ]; then
+        mkdir -p "sub-${subject}"
+        mv "sub-${subject}/ses-${session}" "\${final_bids_dir}"
     fi
 
     # ------------------------------------------------------------------
@@ -65,12 +55,11 @@ process DCM2BIDS_POSTPROC {
     fi
 
     # ------------------------------------------------------------------
-    # 2) Handle ADC derivatives (anat, dwi, fmap, func)
+    # 2) Handle ADC derivatives -> derivatives/dwi_ADC/sub-<subject>/ses-<session>
     # ------------------------------------------------------------------
     derivatives_dwi_adc="derivatives/dwi_ADC/sub-${subject}/ses-${session}"
     mkdir -p "\${derivatives_dwi_adc}"
 
-    # build list of search roots explicitly
     search_dirs=""
     for d in anat dwi fmap func; do
         if [ -d "\${final_bids_dir}/\${d}" ]; then
@@ -79,9 +68,9 @@ process DCM2BIDS_POSTPROC {
     done
 
     adc_files=\$(
-        for root in \${search_dirs}; do
-            if [ -d "\${root}" ]; then
-                find "\${root}" -type f -iname "*adc*" -print 2>/dev/null || true
+        for r in \${search_dirs}; do
+            if [ -d "\${r}" ]; then
+                find "\${r}" -type f -iname "*adc*" -print 2>/dev/null || true
             fi
         done
     )
@@ -98,12 +87,10 @@ EOF
     # ------------------------------------------------------------------
     # 3) Remove sbref.bval / sbref.bvec (only in dwi/)
     # ------------------------------------------------------------------
-    dwi_dir=\$(find "\${final_bids_dir}/dwi" -type d -name "dwi" | head -n1 || true)
-
-    if [ -n "\${dwi_dir}" ]; then
-        sbref_files=\$(find "\${dwi_dir}" -type f \\( -name "*sbref.bval" -o -name "*sbref.bvec" \\) -print 2>/dev/null || true)
+    if [ -d "\${final_bids_dir}/dwi" ]; then
+        sbref_files=\$(find "\${final_bids_dir}/dwi" -type f \\( -name "*sbref.bval" -o -name "*sbref.bvec" \\) -print 2>/dev/null || true)
         if [ -n "\${sbref_files}" ]; then
-            rm \${sbref_files} 2>/dev/null || true
+            rm -f \${sbref_files} 2>/dev/null || true
         fi
     fi
 
@@ -115,9 +102,8 @@ EOF
 
     stub:
     """
+    set -euo pipefail
     mkdir -p "sub-${meta.subject}/ses-${meta.session}"
     mkdir -p "derivatives/dwi_ADC/sub-${meta.subject}/ses-${meta.session}"
     """
 }
-
-

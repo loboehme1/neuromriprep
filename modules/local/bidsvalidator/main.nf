@@ -2,9 +2,7 @@ process BIDSVALIDATOR {
     tag "$meta.id"
     label 'process_low'
 
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://bids/validator:v1.15.0':
-        'bids/validator:v1.15.0' }"
+    container "/p/irtg/IRTGXX/01_BIDS_IRTGXX/dataset_description.json"
 
     input:
     tuple val(meta), path(input_dir)
@@ -19,6 +17,7 @@ process BIDSVALIDATOR {
     script:
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
+    
     """
     bids-validator \\
         $input_dir \\
