@@ -16,67 +16,77 @@
 //               list (`[]`) instead of a file can be used to work around this issue.
 
 process BIDSIGNORE {
-    tag '$bam'
-    label 'process_single'
 
-    // TODO nf-core: See section in main README for further information regarding finding and adding container addresses to the section below.
-    conda "${moduleDir}/environment.yml"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/YOUR-TOOL-HERE':
-        'biocontainers/YOUR-TOOL-HERE' }"
+  tag "${meta.id}"
+  label 'process_low'
 
-    input:// TODO nf-core: Where applicable all sample-specific information e.g. "id", "single_end", "read_group"
-    //               MUST be provided as an input via a Groovy Map called "meta".
-    //               This information may not be required in some instances e.g. indexing reference genome files:
-    //               https://github.com/nf-core/modules/blob/master/modules/nf-core/bwa/index/main.nf
-    // TODO nf-core: Where applicable please provide/convert compressed files as input/output
-    //               e.g. "*.fastq.gz" and NOT "*.fastq", "*.bam" and NOT "*.sam" etc.
-    path bam
+  // Key: make Nextflow stage inputs as a real copy in the work dir
+  stageInMode 'copy'
 
-    output:
-    // TODO nf-core: Named file extensions MUST be emitted for ALL output channels
-    path "*.bam", emit: bam
-    // TODO nf-core: List additional required output channels/values here
-    // TODO nf-core: Update the command here to obtain the version number of the software used in this module
-    // TODO nf-core: If multiple software packages are used in this module, all MUST be added here
-    //               by copying the line below and replacing the current tool with the extra tool(s)
-    tuple val("${task.process}"), val('bidsignore'), eval("bidsignore --version"), topic: versions, emit: versions_bidsignore
+  container "${ task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }"
 
-    when:
-    task.ext.when == null || task.ext.when
+  input:
+  tuple val(meta),
+        path(dataset_dir, stageAs: 'bids_dataset'),   // staged folder name
+        path(ignore_add),
+        path(ignore_remove)
 
-    script:
-    def args = task.ext.args ?: ''
-    
-    // TODO nf-core: Where possible, a command MUST be provided to obtain the version number of the software e.g. 1.10
-    //               If the software is unable to output a version number on the command-line then it can be manually specified
-    //               e.g. https://github.com/nf-core/modules/blob/master/modules/nf-core/homer/annotatepeaks/main.nf
-    //               Each software used MUST provide the software name and version number in the YAML version file (versions.yml)
-    // TODO nf-core: It MUST be possible to pass additional parameters to the tool as a command-line string via the "task.ext.args" directive
-    // TODO nf-core: If the tool supports multi-threading then you MUST provide the appropriate parameter
-    //               using the Nextflow "task" variable e.g. "--threads $task.cpus"
-    // TODO nf-core: Please replace the example samtools command below with your module's command
-    // TODO nf-core: Please indent the command appropriately (4 spaces!!) to help with readability ;)
-    """
-    bidsignore \\
-        $args \\
-        -@ $task.cpus \\
-        $bam
-    """
+  output:
+  tuple val(meta), path("bids_dataset"), emit: bids_dataset
+  path "*.log", emit: log
+  path "versions.yml", emit: versions
 
-    stub:
-    def args = task.ext.args ?: ''
-    
-    // TODO nf-core: A stub section should mimic the execution of the original module as best as possible
-    //               Have a look at the following examples:
-    //               Simple example: https://github.com/nf-core/modules/blob/818474a292b4860ae8ff88e149fbcda68814114d/modules/nf-core/bcftools/annotate/main.nf#L47-L63
-    //               Complex example: https://github.com/nf-core/modules/blob/818474a292b4860ae8ff88e149fbcda68814114d/modules/nf-core/bedtools/split/main.nf#L38-L54
-    // TODO nf-core: If the module doesn't use arguments ($args), you SHOULD remove:
-    //               - The definition of args `def args = task.ext.args ?: ''` above.
-    //               - The use of the variable in the script `echo $args ` below.
-    """
-    echo $args
-    
-    touch ${prefix}.bam
-    """
+  script:
+  def prefix = task.ext.prefix ?: "${meta.id}"
+  """
+  set -euo pipefail
+
+  INPUT_DIR="bids_dataset"
+  LOGFILE="${prefix}_bidsignore.log"
+
+  echo "\$(date +"%Y-%m-%d %H:%M:%S") - Dataset root: \$(pwd)/\$INPUT_DIR" | tee -a "\$LOGFILE"
+
+  # Ensure .bidsignore exists
+  if [ ! -f "\$INPUT_DIR/.bidsignore" ]; then
+    echo "\$(date +"%Y-%m-%d %H:%M:%S") - Creating .bidsignore" | tee -a "\$LOGFILE"
+    : > "\$INPUT_DIR/.bidsignore"
+  fi
+
+  echo "\$(date +"%Y-%m-%d %H:%M:%S") - Initial .bidsignore:" | tee -a "\$LOGFILE"
+  cat "\$INPUT_DIR/.bidsignore" | tee -a "\$LOGFILE" || true
+  echo | tee -a "\$LOGFILE"
+
+  # Add entries
+  while IFS= read -r ITEM; do
+    [ -z "\$ITEM" ] && continue
+    case "\$ITEM" in \\#*) continue ;; esac
+    if ! grep -Fxq "\$ITEM" "\$INPUT_DIR/.bidsignore"; then
+      echo "\$(date +"%Y-%m-%d %H:%M:%S") - Adding '\$ITEM'" | tee -a "\$LOGFILE"
+      echo "\$ITEM" >> "\$INPUT_DIR/.bidsignore"
+    fi
+  done < "${ignore_add}"
+
+  # Remove entries
+  if [ -s "${ignore_remove}" ]; then
+    while IFS= read -r ITEM; do
+      [ -z "\$ITEM" ] && continue
+      case "\$ITEM" in \\#*) continue ;; esac
+      if grep -Fxq "\$ITEM" "\$INPUT_DIR/.bidsignore"; then
+        echo "\$(date +"%Y-%m-%d %H:%M:%S") - Removing '\$ITEM'" | tee -a "\$LOGFILE"
+        grep -Fxv "\$ITEM" "\$INPUT_DIR/.bidsignore" > "\$INPUT_DIR/.bidsignore.tmp"
+        mv "\$INPUT_DIR/.bidsignore.tmp" "\$INPUT_DIR/.bidsignore"
+      fi
+    done < "${ignore_remove}"
+  fi
+
+  echo "\$(date +"%Y-%m-%d %H:%M:%S") - Final .bidsignore:" | tee -a "\$LOGFILE"
+  cat "\$INPUT_DIR/.bidsignore" | tee -a "\$LOGFILE" || true
+  echo | tee -a "\$LOGFILE"
+
+  cat <<-END_VERSIONS > versions.yml
+  "${task.process}":
+    tool: "shell"
+  END_VERSIONS
+  """
 }
+

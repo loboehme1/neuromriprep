@@ -1,0 +1,6 @@
+# one pattern per line (comments allowed)
+tmp_dcm2bids/
+logs_dcm2bids/
+sourcedata/
+*_epi.bval
+*_epi.bvec

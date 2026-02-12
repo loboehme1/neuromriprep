@@ -8,18 +8,9 @@ include { DCM2BIDS_CONFIG   } from '../modules/local/dcm2bidsconfig'
 include { DCM2BIDS_POSTPROC } from '../modules/local/dcm2bidspostprocess'
 include { MERGE_BIDS_DATASET} from '../modules/local/mergebidsdataset'
 include { BIDS_VALIDATOR    } from '../modules/local/bidsvalidator'
+include { BIDSIGNORE        } from '../modules/local/bidsignore'
 include { MRIQC             } from '../modules/local/mriqc'
-/*
-include { BIDSVALIDATOR          } from '../modules/local/bidsvalidator'
-include { MRIQC                  } from '../modules/local/mriqc'
-include { FMRIPREP               } from '../modules/local/fmriprep'
-include { PYDEFACE               } from '../modules/local/pydeface'
-//include { paramsSummaryMap       } from 'plugin/nf-schema'
-include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
-include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
-include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_neuromriprep_pipeline'
-include { MULTIQC                } from '../modules/nf-core/multiqc'
-*/
+
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -145,21 +136,31 @@ workflow NEUROMRIPREP {
     ch_bids_dataset = MERGE_BIDS_DATASET.out.bids_dataset
 
 
-    ch_any_meta = ch_samplesheet.map { meta, dicom_dir -> meta }.first()
-
-    ch_dataset_meta = ch_any_meta.map { meta ->
-        meta + [ id: 'dataset' ]    // so tag and log file name are clean
-    }
-
-    ch_validator_in = ch_dataset_meta.combine(ch_bids_dataset).map { meta, ds ->
-        tuple(meta, ds)
-    }
+    ch_dataset_meta = ch_samplesheet.map { meta, _ -> meta }.first().map { meta -> meta + [ id: 'dataset' ] }
 
 
+    // read in 
+    ch_ignore_add    = Channel.fromPath('assets/bidsignore_list.txt')
+    ch_ignore_remove = Channel.fromPath('assets/bidsignore_remove.txt', checkIfExists: false)
+
+
+
+    ch_bidsignore_in = ch_dataset_meta
+    .combine(ch_bids_dataset)
+    .combine(ch_ignore_add)
+    .combine(ch_ignore_remove)
+    .map { meta, ds, addf, remf -> tuple(meta, ds, addf, remf) }
+
+    //bidsignore
+
+    BIDSIGNORE(ch_bidsignore_in)
+
+    ch_bidsval_in = BIDSIGNORE.out.bids_dataset
 
     //bidsvalidator
 
-    BIDS_VALIDATOR(ch_validator_in)
+    BIDS_VALIDATOR(ch_bidsval_in)
+
 
 
     // mriqc
