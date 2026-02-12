@@ -9,7 +9,7 @@ process DCM2BIDS_POSTPROC {
 
     output:
     tuple val(meta), path("sub-${meta.subject}"), emit: bids_sub
-    tuple val(meta), path("derivatives/dwi_ADC/sub-${meta.subject}"), emit: derivatives
+    tuple val(meta), path("derivatives/dwi_ADC/sub-${meta.subject}"), emit: dwi_adc_sub
 
     script:
     def subject  = meta.subject

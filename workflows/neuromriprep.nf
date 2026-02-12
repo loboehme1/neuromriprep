@@ -3,9 +3,11 @@
     IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { DCM2BIDS               } from '../modules/local/dcm2bids'
+include { DCM2BIDS          } from '../modules/local/dcm2bids'
 include { DCM2BIDS_CONFIG   } from '../modules/local/dcm2bidsconfig'
 include { DCM2BIDS_POSTPROC } from '../modules/local/dcm2bidspostprocess'
+include { MERGE_BIDS_DATASET} from '../modules/local/mergebidsdataset'
+include { BIDS_VALIDATOR    } from '../modules/local/bidsvalidator'
 include { MRIQC             } from '../modules/local/mriqc'
 /*
 include { BIDSVALIDATOR          } from '../modules/local/bidsvalidator'
@@ -115,23 +117,49 @@ workflow NEUROMRIPREP {
 
     // postprocessing
 
-    DCM2BIDS_POSTPROC(ch_bids_raw)
+    DCM2BIDS_POSTPROC(
+        ch_bids_raw
+    )
 
 
     // output
 
     postproc_out = DCM2BIDS_POSTPROC.out.bids_sub
-    derivatives = DCM2BIDS_POSTPROC.out.derivatives
+    dwi_adc_sub= DCM2BIDS_POSTPROC.out.dwi_adc_sub
 
 
-    // transfor channel entries to list
-    //ch_root_paths = ch_bids_roots.map { meta, root -> root }
-    //ch_root_list = ch_root_paths.collect()
+    ch_sub_dirs     = DCM2BIDS_POSTPROC.out.bids_sub.map { meta, subdir -> subdir }.collect()
+    ch_dwi_adc_dirs = DCM2BIDS_POSTPROC.out.dwi_adc_sub.map { meta, ddir -> ddir }.collect()
+
+    ch_logs         = DCM2BIDS.out.log.collect()
+
+
+    // merge bids dataset
+
+    MERGE_BIDS_DATASET(
+        ch_sub_dirs, 
+        ch_dwi_adc_dirs, 
+        ch_logs
+    )
+
+    ch_bids_dataset = MERGE_BIDS_DATASET.out.bids_dataset
+
+
+    ch_any_meta = ch_samplesheet.map { meta, dicom_dir -> meta }.first()
+
+    ch_dataset_meta = ch_any_meta.map { meta ->
+        meta + [ id: 'dataset' ]    // so tag and log file name are clean
+    }
+
+    ch_validator_in = ch_dataset_meta.combine(ch_bids_dataset).map { meta, ds ->
+        tuple(meta, ds)
+    }
+
 
 
     //bidsvalidator
 
-    //bidsvalidator()
+    BIDS_VALIDATOR(ch_validator_in)
 
 
     // mriqc
@@ -142,7 +170,7 @@ workflow NEUROMRIPREP {
 
     emit:
     bids_output = postproc_out
-    derivatives = derivatives
+    //derivatives = derivatives
     versions    = ch_versions
 }
 
