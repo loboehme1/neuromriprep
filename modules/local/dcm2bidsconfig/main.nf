@@ -19,8 +19,8 @@ process DCM2BIDS_CONFIG{
 
     label 'process_single'
 
-    // Same container as before (has dcm2bids + jq)
-    //container "${ task.ext.container ?: '/nic/sw/IRTG/sif/dcm2bids_3.2.0.sif' }"
+    // ubuntu jq container
+    container "${ task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }"
 
     input:
     tuple val(meta), path(config_file)

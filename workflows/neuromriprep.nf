@@ -6,6 +6,7 @@
 include { DCM2BIDS               } from '../modules/local/dcm2bids'
 include { DCM2BIDS_CONFIG   } from '../modules/local/dcm2bidsconfig'
 include { DCM2BIDS_POSTPROC } from '../modules/local/dcm2bidspostprocess'
+include { MRIQC             } from '../modules/local/mriqc'
 /*
 include { BIDSVALIDATOR          } from '../modules/local/bidsvalidator'
 include { MRIQC                  } from '../modules/local/mriqc'
@@ -35,17 +36,17 @@ workflow NEUROMRIPREP {
 
 
     // Extract subject and session from DICOM folder basename
-    // Expected format: IRTGXX_SYY where XX is subject and YY is session
+    // Expected format: IRTGXX_SYY: XX is subject and YY is session
     ch_input = ch_samplesheet
         .map { meta, dicom_dir ->
 
             def folder_name = dicom_dir.name
             def parts       = folder_name.split('_')
 
-            // Extract subject (e.g. "01" from "IRTG01_001001")
+            // Extract subject
             def subject = parts.size() > 1 ? parts[1] : "unknown"
 
-            // Extract session (e.g. from "..._S01")
+            // Extract session 
             def sesStr    = parts.size() > 2 ? parts[2] : ""
             def ses_match = sesStr =~ /S(\d+)/
             def ses       = ses_match ? ses_match[0][1] : "01"
@@ -57,7 +58,7 @@ workflow NEUROMRIPREP {
                 project: meta.project
             ]
 
-            // emit tuple
+            // emit tuple with meta + directory
             tuple(new_meta, dicom_dir)
         }
 
@@ -112,9 +113,6 @@ workflow NEUROMRIPREP {
     }
 
 
-
-
-
     // postprocessing
 
     DCM2BIDS_POSTPROC(ch_bids_raw)
@@ -122,28 +120,27 @@ workflow NEUROMRIPREP {
 
     // output
 
-    postproc_out = DCM2BIDS_POSTPROC.out.bids_post
+    postproc_out = DCM2BIDS_POSTPROC.out.bids_sub
     derivatives = DCM2BIDS_POSTPROC.out.derivatives
 
 
-    // MRIQC
+    // transfor channel entries to list
+    //ch_root_paths = ch_bids_roots.map { meta, root -> root }
+    //ch_root_list = ch_root_paths.collect()
 
-    MRIQC(
-        postproc_out,
-        params.mriqc_config,
-        params.mriqc_participant_level
-    )
+
+    //bidsvalidator
+
+    //bidsvalidator()
+
+
+    // mriqc
 
 
 
 
 
     emit:
-    // final, post-processed BIDS tree
-    //ch_bids_raw = DCM2BIDS.out.bids_output
-    //bids_output = DCM2BIDS_POSTPROC.out.bids_post
-    // derivatives created by post-processing (ADC)
-    //derivatives = DCM2BIDS_POSTPROC.out.derivatives
     bids_output = postproc_out
     derivatives = derivatives
     versions    = ch_versions

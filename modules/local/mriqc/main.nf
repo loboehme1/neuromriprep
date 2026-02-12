@@ -4,12 +4,12 @@ process MRIQC {
 
     //container "$( task.ext.container ?: /nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif)"
 
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://nipreps/mriqc:25.0.0rc0':
-        'nipreps/mriqc:25.0.0rc0' }"
+    container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
+
 
     input:
     tuple val(meta), path(input_dir)
+    tuple val(meta), path(bids_dir)
 
 
     output:
@@ -22,7 +22,9 @@ process MRIQC {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
-    def mem_gb = task.memory.toGiga()
+    def mem_gb = 16
+    def cpus = 16
+    def threads = 4
     """
 
     mkdir -p \$PWD/results
@@ -33,13 +35,15 @@ process MRIQC {
         \$results \\
         participant \\
         --participant-label $prefix \\
-        --nprocs $task.cpus \\
-        --omp-nthreads $task.cpus \\
+        --nprocs $cpus \\
+        --omp-nthreads $threads \\
         --mem_gb $mem_gb \\
         --no-sub \\
-        -v \\
+        -v\\
         --verbose-reports \\
         $args
+
+
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
