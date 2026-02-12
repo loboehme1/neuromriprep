@@ -2,6 +2,8 @@ process MRIQC {
     tag "$meta.id"
     label 'process_medium'
 
+    //container "$( task.ext.container ?: /nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif)"
+
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'docker://nipreps/mriqc:25.0.0rc0':
         'nipreps/mriqc:25.0.0rc0' }"

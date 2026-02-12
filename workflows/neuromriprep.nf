@@ -125,10 +125,15 @@ workflow NEUROMRIPREP {
     postproc_out = DCM2BIDS_POSTPROC.out.bids_post
     derivatives = DCM2BIDS_POSTPROC.out.derivatives
 
-    postproc_out.view { bids_dir ->
-        log.info "[DEBUG] ch_bids_raw item: ${bids_dir} (name=${bids_dir.name})"
-        // or just: "[DEBUG] ch_bids_raw: ${bids_dir}"
-    }
+
+    // MRIQC
+
+    MRIQC(
+        postproc_out,
+        params.mriqc_config,
+        params.mriqc_participant_level
+    )
+
 
 
 
