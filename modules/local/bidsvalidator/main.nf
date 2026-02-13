@@ -3,7 +3,6 @@ process BIDS_VALIDATOR {
     tag "${meta.id}"
     label 'process_low'
 
-    // keep your validator container
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/validator_1.14.13.sif' }"
 
     // (optional) keep your bash bind if you need it for this image
@@ -15,7 +14,7 @@ process BIDS_VALIDATOR {
     output:
     tuple val(meta), path("${task.ext.prefix ?: meta.id}_validation_log.txt")    , emit: log
     tuple val(meta), path("${task.ext.prefix ?: meta.id}_validation_summary.txt"), emit: summary
-    path "versions.yml"                                                         , emit: versions
+    path "versions.yml"                                                          , emit: versions
 
     when:
     task.ext.when == null || task.ext.when

@@ -9,7 +9,8 @@ include { DCM2BIDS_POSTPROC } from '../modules/local/dcm2bidspostprocess'
 include { MERGE_BIDS_DATASET} from '../modules/local/mergebidsdataset'
 include { BIDS_VALIDATOR    } from '../modules/local/bidsvalidator'
 include { BIDSIGNORE        } from '../modules/local/bidsignore'
-include { MRIQC             } from '../modules/local/mriqc'
+include { MRIQC_PARTICIPANT } from '../modules/local/mriqcparticipant'
+include { MRIQC_GROUP       } from '../modules/local/mriqcgroup'
 
 
 /*
@@ -163,12 +164,42 @@ workflow NEUROMRIPREP {
 
 
 
-    // mriqc
+    // Print counts + log location to console -> stop so human can look at logs
+
+    if( params.stop_bidsval) {
+
+        log.warn "[BIDS] Stopping after BIDS validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
+
+    } else {
+
+        ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset.map { meta_ds, ds -> ds }
+
+
+        // Build per-subject inputs: (meta, bids_dataset)
+        ch_mriqc_in = ch_input
+            .map { meta, _ -> meta }                       // meta contains subject/session
+            .combine(ch_bids_dataset_after_ignore)
+            .map { meta, ds -> tuple(meta, ds) }
+
+        ch_mriqc_in.view { it ->
+            log.info "[DEBUG MRIQC_IN] ${it}"
+        }
+
+
+        MRIQC_PARTICIPANT(
+            ch_mriqc_in
+        )
+
+    }
 
 
 
 
 
+
+
+
+    
     emit:
     bids_output = postproc_out
     //derivatives = derivatives
