@@ -31,55 +31,47 @@ process MRIQC_PARTICIPANT {
     path "versions.yml", emit: versions
 
     script:
-    def args    = task.ext.args ?: ''
-    def mem_gb  = task.ext.mem_gb ?: 16
-    def nprocs  = task.ext.nprocs ?: (task.cpus ?: 16)
-    def threads = task.ext.omp_threads ?: 4
+    def args      = task.ext.args ?: ''
+    def mem_gb    = task.ext.mem_gb ?: 16
+    def nprocs    = task.ext.nprocs ?: (task.cpus ?: 16)
+    def threads   = task.ext.omp_threads ?: 4
     def participant = meta.subject.toString()
-    def mriqc_bin = task.ext.mriqc_bin ?: 'mriqc'
+
+    // Prefer absolute path in this container (we verified it exists)
+    def mriqc_cmd = task.ext.mriqc_bin ?: '/opt/conda/bin/mriqc'
 
     """
     set -euo pipefail
 
     echo "[CANARY] started \$(date)" > mriqc_participant.log
-    export PATH="/opt/conda/bin:\$PATH"
+    echo "[DEBUG] inside container? APPTAINER_NAME=\${APPTAINER_NAME:-} SINGULARITY_NAME=\${SINGULARITY_NAME:-}" | tee -a mriqc_participant.log
+    echo "[DEBUG] PATH=\$PATH" | tee -a mriqc_participant.log
 
-    mriqc_bin="\${mriqc_bin:-mriqc}"
-
-    # If mriqc is not found, try the known location inside the MRIQC container
-    if ! command -v "$mriqc_bin" >/dev/null 2>&1; then
-        if [ -x /opt/conda/bin/mriqc ]; then
-            mriqc_bin=/opt/conda/bin/mriqc
-        fi
-    fi
-
-    echo "[INFO] mriqc_bin=$mriqc_bin" | tee -a mriqc_participant.log
-    "$mriqc_bin" --version | tee -a mriqc_participant.log
-
-
-
+    echo "[INFO] mriqc_cmd=${mriqc_cmd}" | tee -a mriqc_participant.log
+    command -v ${mriqc_cmd} 2>&1 | tee -a mriqc_participant.log || true
+    ${mriqc_cmd} --version 2>&1 | tee -a mriqc_participant.log
 
     mkdir -p mriqc_out
 
-    (
-      ${mriqc_bin} \\
-        input_bids \\
-        mriqc_out \\
-        participant \\
-        --participant-label ${participant} \\
-        --nprocs ${nprocs} \\
-        --omp-nthreads ${threads} \\
-        --mem_gb ${mem_gb} \\
-        --no-sub \\
-        -v \\
-        --verbose-reports \\
-        ${args}
-    ) 2>&1 | tee -a mriqc_participant.log
+    ${mriqc_cmd} \\
+      input_bids \\
+      mriqc_out \\
+      participant \\
+      --participant-label ${participant} \\
+      --nprocs ${nprocs} \\
+      --omp-nthreads ${threads} \\
+      --mem_gb ${mem_gb} \\
+      --no-sub \\
+      -v \\
+      --verbose-reports \\
+      ${args} \\
+      2>&1 | tee -a mriqc_participant.log
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-      mriqc: \$(${mriqc_bin} --version 2>&1 | sed 's/MRIQC v//g' || echo "unknown")
+      mriqc: \$(${mriqc_cmd} --version 2>&1 | sed 's/MRIQC v//g' || echo "unknown")
     END_VERSIONS
     """
 }
+
 

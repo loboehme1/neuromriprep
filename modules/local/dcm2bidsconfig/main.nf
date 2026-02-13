@@ -15,6 +15,11 @@
 // TODO nf-core: Optional inputs are not currently supported by Nextflow. However, using an empty
 //               list (`[]`) instead of a file can be used to work around this issue.
 
+
+
+// TODO: files are not saved at correct spot
+// TODO: in normal mriqc output subjects are overwritten with each new subject
+
 process DCM2BIDS_CONFIG{
 
     label 'process_single'

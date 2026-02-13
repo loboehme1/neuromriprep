@@ -160,7 +160,7 @@ workflow NEUROMRIPREP {
 
     //bidsvalidator
 
-    BIDS_VALIDATOR(ch_bidsval_in)
+    //BIDS_VALIDATOR(ch_bidsval_in)
 
 
 

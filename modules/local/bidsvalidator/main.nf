@@ -5,9 +5,6 @@ process BIDS_VALIDATOR {
 
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/validator_1.14.13.sif' }"
 
-    // (optional) keep your bash bind if you need it for this image
-    // containerOptions "${ task.ext.containerOptions ?: '--bind /usr/bin/bash:/bin/bash' }"
-
     input:
     tuple val(meta), path(input_dir)
 
@@ -24,6 +21,18 @@ process BIDS_VALIDATOR {
     def prefix = task.ext.prefix ?: "${meta.id}"
 
     """
+
+    : > ${prefix}_validation_log.txt
+
+    {
+        echo "[DEBUG] started: \$(date -Is)"
+        echo "[DEBUG] PWD=\$(pwd)"
+        echo "[DEBUG] APPTAINER_NAME=\${APPTAINER_NAME:-} SINGULARITY_NAME=\${SINGULARITY_NAME:-}"
+        echo "[DEBUG] PATH=\$PATH"
+        echo "[DEBUG] inside apptainer? \$( [ -d /.singularity.d ] && echo yes || echo no )"
+        echo "[DEBUG] which bids-validator: \$(command -v bids-validator 2>/dev/null || echo not_found)"
+    } >> ${prefix}_validation_log.txt
+
     set -euo pipefail
 
     status=0
