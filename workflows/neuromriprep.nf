@@ -11,6 +11,8 @@ include { BIDS_VALIDATOR    } from '../modules/local/bidsvalidator'
 include { BIDSIGNORE        } from '../modules/local/bidsignore'
 include { MRIQC_PARTICIPANT } from '../modules/local/mriqcparticipant'
 include { MRIQC_GROUP       } from '../modules/local/mriqcgroup'
+include { FMRIPREP          } from '../modules/local/fmriprep'
+
 
 
 /*
@@ -172,7 +174,9 @@ workflow NEUROMRIPREP {
 
     } else {
 
-        ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset.map { meta_ds, ds -> ds }
+        ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset
+            .map { meta, outdir -> outdir }
+            .collect()
 
 
         // Build per-subject inputs: (meta, bids_dataset)
@@ -180,10 +184,6 @@ workflow NEUROMRIPREP {
             .map { meta, _ -> meta }                       // meta contains subject/session
             .combine(ch_bids_dataset_after_ignore)
             .map { meta, ds -> tuple(meta, ds) }
-
-        ch_mriqc_in.view { it ->
-            log.info "[DEBUG MRIQC_IN] ${it}"
-        }
 
 
         MRIQC_PARTICIPANT(
@@ -193,14 +193,13 @@ workflow NEUROMRIPREP {
         ch_mriqc_part_dirs = MRIQC_PARTICIPANT.out.mriqc_out
             .map { meta, outdir -> outdir }
             .collect()
+            .map { dirs -> dirs.toSet() }   
 
         ch_mriqc_group_in = ch_dataset_meta
             .combine(ch_bids_dataset_after_ignore)
             .combine(ch_mriqc_part_dirs)
-            .map { meta_ds, ds, part_dirs -> tuple(meta_ds, ds, part_dirs) }
 
         MRIQC_GROUP(ch_mriqc_group_in)
-
 
     }
 
