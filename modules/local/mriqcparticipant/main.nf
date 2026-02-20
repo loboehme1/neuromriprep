@@ -1,7 +1,7 @@
 process MRIQC_PARTICIPANT {
 
     tag "${meta.subject}"
-    label 'process_medium'
+    label 'process_high'
 
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
 

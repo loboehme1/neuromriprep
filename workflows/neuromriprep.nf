@@ -176,7 +176,7 @@ workflow NEUROMRIPREP {
 
         ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset
             .map { meta, outdir -> outdir }
-            .collect()
+            .first()
 
 
         // Build per-subject inputs: (meta, bids_dataset)
@@ -200,6 +200,67 @@ workflow NEUROMRIPREP {
             .combine(ch_mriqc_part_dirs)
 
         MRIQC_GROUP(ch_mriqc_group_in)
+
+
+
+        if( params.stop_mriqc) {
+
+            log.warn "[BIDS] Stopping after BIDS validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
+        } else {
+            // Dataset dir (single value)
+            ch_fmriprep_ds = ch_bids_dataset_after_ignore
+
+            // per-subject meta channel: one item per subject
+            ch_fmriprep_meta = ch_input
+                .map { meta, _ -> meta }
+                .map { meta -> meta + [ id: "sub-${meta.subject}" ] } 
+
+            // restrict to a VPN list file (one subject per line, allow "sub-XXX")
+            if( params.fmriprep_vpn_file ) {
+                def vpn_set = file(params.fmriprep_vpn_file)
+                    .text
+                    .readLines()
+                    .collect { it.replace('\r','').trim() }
+                    .findAll { it }
+                    .collect { it.replaceFirst(/^sub-/, '') }
+                    .toSet()
+
+                ch_fmriprep_meta = ch_fmriprep_meta.filter { meta ->
+                    vpn_set.contains(meta.subject.toString().replaceFirst(/^sub-/, ''))
+                }
+            }
+
+            // BIDS filter selection: null | ses01 | ses02 | explicit json path
+            def bf = params.fmriprep_bids_filter ? params.fmriprep_bids_filter.toString() : null
+            def bf_path = null
+            if( bf ) {
+                if( bf == 'ses01' )      bf_path = '/nic/sw/IRTG/scripts/bids-filter-file/filter_ses01.json'
+                else if( bf == 'ses02' ) bf_path = '/nic/sw/IRTG/scripts/bids-filter-file/filter_ses02.json'
+                else                     bf_path = bf
+            }
+
+            def ch_bids_filter = bf_path \
+                ? Channel.value(file(bf_path)) \
+                : Channel.value(file("${projectDir}/assets/empty_bids_filter.json"))
+
+
+            // FreeSurfer license (required by fMRIPrep)
+            def ch_fs_license = Channel.value( file(params.fmriprep_fs_license) )
+
+            // Compose inputs for module
+            // Common pattern: (meta, ds, fs_license, bids_filter)
+            ch_fmriprep_in = ch_fmriprep_meta
+                .combine(ch_fmriprep_ds)
+                .combine(ch_fs_license)
+                .combine(ch_bids_filter)
+                .map { meta, ds, lic, filt -> [meta, ds, lic, filt] }
+
+            // Run fMRIPrep
+            FMRIPREP(ch_fmriprep_in)
+        }
+
+
+
 
     }
 
