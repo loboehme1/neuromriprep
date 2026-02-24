@@ -1,6 +1,8 @@
 process MERGE_BIDS_DATASET {
 
+
     label 'process_single'
+
     container "${ task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }"
 
     input:
@@ -10,6 +12,8 @@ process MERGE_BIDS_DATASET {
 
     output:
     path "bids_dataset", emit: bids_dataset
+
+
 
     script:
     """
@@ -29,29 +33,27 @@ EOF
     # Merge subjects (FOLLOW symlinks + copy contents)
     for s in ${sub_dirs}; do
       [ -d "\$s" ] || continue
-      dest="bids_dataset/\$(basename "\$s")"          # <-- NEW
-      mkdir -p "\$dest"                               # <-- NEW
-      cp -aL "\$s/." "\$dest/"                        # <-- CHANGED (was: cp -a "\$s/" ...)
+      dest="bids_dataset/\$(basename "\$s")"         
+      mkdir -p "\$dest"                               
+      cp -aL "\$s/." "\$dest/"                        
     done
 
     # Merge ADC derivatives (FOLLOW symlinks + copy contents)
     for d in ${dwi_adc_sub_dirs}; do
       [ -d "\$d" ] || continue
-      dest="bids_dataset/derivatives/dwi_ADC/\$(basename "\$d")"   # <-- NEW
-      mkdir -p "\$dest"                                            # <-- NEW
-      cp -aL "\$d/." "\$dest/"                                     # <-- CHANGED
+      dest="bids_dataset/derivatives/dwi_ADC/\$(basename "\$d")"   
+      mkdir -p "\$dest"                                            
+      cp -aL "\$d/." "\$dest/"                                     
     done
 
     # Collect logs
     for lf in ${log_files}; do
       [ -f "\$lf" ] || continue
-      cp -a "\$lf" "bids_dataset/logs_dcm2bids/"      # <-- tiny improvement: cp -a
+      cp -a "\$lf" "bids_dataset/logs_dcm2bids/"      
     done
 
-    echo "[DEBUG] merged dataset top level:"
     ls -la bids_dataset
 
-    echo "[DEBUG] symlinks inside bids_dataset (should be empty):"  # <-- NEW
-    find bids_dataset -type l -print || true                        # <-- NEW
+    find bids_dataset -type l -print || true                        
     """
 }

@@ -19,9 +19,8 @@ process DCM2BIDS_POSTPROC {
     """
     set -euo pipefail
 
-    # ------------------------------------------------------------------
-    # 0) Ensure final BIDS folder structure: sub-<subject>/ses-<session>
-    # ------------------------------------------------------------------
+    # final folder structure
+
     final_bids_dir="sub-${subject}/ses-${session}"
     orig_bids_dir="${bidsName}"
 
@@ -37,9 +36,8 @@ process DCM2BIDS_POSTPROC {
         mv "sub-${subject}/ses-${session}" "\${final_bids_dir}"
     fi
 
-    # ------------------------------------------------------------------
-    # 1) Remove Acquisitionduration from all *_bold.json
-    # ------------------------------------------------------------------
+    # Remove Acquisitionduration from all *_bold.json
+
     bold_jsons=\$(find "\${final_bids_dir}" -type f -name "*_bold.json" 2>/dev/null || true)
 
     if [ -n "\${bold_jsons}" ]; then
@@ -54,9 +52,9 @@ process DCM2BIDS_POSTPROC {
         done
     fi
 
-    # ------------------------------------------------------------------
+
     # 2) Handle ADC derivatives -> derivatives/dwi_ADC/sub-<subject>/ses-<session>
-    # ------------------------------------------------------------------
+
     derivatives_dwi_adc="derivatives/dwi_ADC/sub-${subject}/ses-${session}"
     mkdir -p "\${derivatives_dwi_adc}"
 
@@ -84,9 +82,9 @@ process DCM2BIDS_POSTPROC {
 EOF
     fi
 
-    # ------------------------------------------------------------------
-    # 3) Remove sbref.bval / sbref.bvec (only in dwi/)
-    # ------------------------------------------------------------------
+
+    # Remove sbref.bval / sbref.bvec (only in dwi/)
+
     if [ -d "\${final_bids_dir}/dwi" ]; then
         sbref_files=\$(find "\${final_bids_dir}/dwi" -type f \\( -name "*sbref.bval" -o -name "*sbref.bvec" \\) -print 2>/dev/null || true)
         if [ -n "\${sbref_files}" ]; then
@@ -94,9 +92,9 @@ EOF
         fi
     fi
 
-    # ------------------------------------------------------------------
-    # 4) Remove tmp_dcm2bids if present
-    # ------------------------------------------------------------------
+
+    # Remove tmp_dcm2bids if present
+
     rm -rf tmp_dcm2bids || true
     """
 

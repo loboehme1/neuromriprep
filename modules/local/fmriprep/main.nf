@@ -20,10 +20,11 @@ process FMRIPREP {
 
 
     output:
-    tuple val(meta), path("fmriprep_out"), emit: out
+    tuple val(meta), path("fmriprep_out_sub-${meta.subject}"), emit: out
+    path "versions_sub-${meta.subject}.yml", emit: versions
     path "logs/sub-${meta.subject}_out.log", emit: log_out
     path "logs/sub-${meta.subject}_err.log", emit: log_err
-    path "versions.yml", emit: versions
+
 
     script:
     def participant      = meta.subject.toString()
@@ -31,6 +32,8 @@ process FMRIPREP {
     def random_seed      = task.ext.random_seed ?: 13
     def longitudinal     = task.ext.longitudinal ? '--longitudinal' : ''
     def extra_spaces     = (task.ext.extra_output_spaces ?: '').toString().trim()
+    def outdir      = "fmriprep_out_sub-${participant}"
+    def wdir        = "work_dir_sub-${participant}"
 
     def base_spaces      = task.ext.base_output_spaces ?: 'MNI152NLin2009cAsym MNI152NLin6Asym'
     def all_spaces       = extra_spaces ? "${base_spaces} ${extra_spaces}".trim() : base_spaces
@@ -69,28 +72,24 @@ process FMRIPREP {
     echo "[INFO] filter_arg=\${FILTER_ARG:-<none>}" | tee -a logs/sub-${participant}_out.log
 
     # Run fMRIPrep
-    # Note: --skip_bids_validation matches your bash script.
     fmriprep \\
       input_bids \\
-      fmriprep_out \\
+      "${outdir}" \\
       participant \\
       --notrack \\
       --participant-label ${participant} \\
-      ${longitudinal} \\
-      \${FILTER_ARG:-} \\
       --fs-license-file fs_license.txt \\
       --skip_bids_validation \\
       --omp-nthreads ${omp_threads} \\
       --random-seed ${random_seed} \\
       --skull-strip-fixed-seed \\
       --output-spaces ${all_spaces} \\
-      --work-dir work_dir \\
+      --work-dir "${wdir}" \\
       2>&1 | tee -a logs/sub-${participant}_out.log
 
-    # Extract warnings/errors similar to your bash grep step
     grep -i -e "warning" -e "error" logs/sub-${participant}_out.log > logs/sub-${participant}_err.log || true
 
-    cat <<-END_VERSIONS > versions.yml
+    cat <<-END_VERSIONS > versions_sub-${participant}.yml
     "${task.process}":
       fmriprep: "\$(fmriprep --version 2>/dev/null | tr -d '\\n' || echo unknown)"
     END_VERSIONS

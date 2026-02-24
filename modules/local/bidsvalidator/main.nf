@@ -3,7 +3,7 @@ process BIDS_VALIDATOR {
     tag "${meta.id}"
     label 'process_low'
 
-    container "${ task.ext.container ?: '/nic/sw/IRTG/sif/validator_1.14.13.sif' }"
+    container "${ task.ext.container ?: '/home/loboehme/Documents/container/ownconts/bidsvalidator_bash.sif' }"
 
     input:
     tuple val(meta), path(input_dir)
@@ -37,19 +37,19 @@ process BIDS_VALIDATOR {
 
     status=0
 
-    # Always create a log file, even if bids-validator is missing
+    # Always create a log file
     if command -v bids-validator >/dev/null 2>&1; then
       bids-validator \\
         ${input_dir} \\
         --verbose \\
         ${args} \\
-        > ${prefix}_validation_log.txt 2>&1 || status=\$?
+        >> ${prefix}_validation_log.txt 2>&1 || status=\$?
     else
       status=127
       echo "[BIDS_VALIDATOR] bids-validator not found in container." > ${prefix}_validation_log.txt
     fi
 
-    # Count messages (works with typical BIDS validator output)
+    # Count messages (does not work ithink')
     errors=\$(grep -cE '^\\s*\\[ERROR\\]'   ${prefix}_validation_log.txt 2>/dev/null || true)
     warns=\$(grep -cE '^\\s*\\[(WARNING|WARN)\\]' ${prefix}_validation_log.txt 2>/dev/null || true)
 
@@ -63,7 +63,7 @@ process BIDS_VALIDATOR {
     warnings=\${warns}
     EOF
 
-    # versions.yml (never fail)
+    # versions.yml
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
       bids-validator: \$(bids-validator --version 2>/dev/null | sed 's/bids-validator v//g' || echo "unknown")

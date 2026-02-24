@@ -29,7 +29,7 @@ process MRIQC_GROUP {
 
     mkdir -p mriqc_group_out work_dir
 
-    # Merge participant outputs into the outdir (MRIQC group expects the participant JSONs/reports there)
+    # Merge participant outputs into the outdir 
     shopt -s nullglob dotglob
     for d in participants/*; do
       if [[ -d "\$d" ]]; then
@@ -52,7 +52,6 @@ process MRIQC_GROUP {
       ${args} \\
       2>&1 | tee -a mriqc_group.log
 
-    # Match your bash behaviour: keep only warnings/errors in a separate file
     grep -i -e "warning" -e "error" mriqc_group.log > mriqc_group.errwarn.log || true
 
     cat <<-END_VERSIONS > versions.yml

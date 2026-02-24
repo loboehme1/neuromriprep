@@ -19,11 +19,10 @@ process BIDSIGNORE {
 
   tag "${meta.id}"
   label 'process_low'
-
-  // Key: make Nextflow stage inputs as a real copy in the work dir
   stageInMode 'copy'
 
-  container "${ task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }"
+
+  container { task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }
 
   input:
   tuple val(meta),

@@ -68,6 +68,7 @@ workflow NFCORE_NEUROMRIPREP {
     emit:
     //copied_dicoms  = NEUROMRIPREP.out.copied_dicoms
     bids_output    = NEUROMRIPREP.out.bids_output
+    dcm2bids_merge = NEUROMRIPREP.out.dcm2bids_merge
     //derivatives    = NEUROMRIPREP.out.derivatives
     //log            = NEUROMRIPREP.out.log
     versions       = NEUROMRIPREP.out.versions
@@ -117,6 +118,15 @@ workflow {
         NFCORE_NEUROMRIPREP.out.multiqc_report
     )
     */
+
+    publish:
+    merge_out = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
+}
+
+output {
+    merge_out {
+        path 'merge_out'
+    }
 }
 
 /*

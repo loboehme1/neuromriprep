@@ -12,6 +12,9 @@ include { BIDSIGNORE        } from '../modules/local/bidsignore'
 include { MRIQC_PARTICIPANT } from '../modules/local/mriqcparticipant'
 include { MRIQC_GROUP       } from '../modules/local/mriqcgroup'
 include { FMRIPREP          } from '../modules/local/fmriprep'
+include { PYDEFACE          } from '../modules/local/pydeface'
+include { MRIQC_PARTICIPANTS} from '../subworkflows/local/mriqc_participants'
+
 
 
 
@@ -143,8 +146,8 @@ workflow NEUROMRIPREP {
 
 
     // read in 
-    ch_ignore_add    = Channel.fromPath('assets/bidsignore_list.txt')
-    ch_ignore_remove = Channel.fromPath('assets/bidsignore_remove.txt', checkIfExists: false)
+    ch_ignore_add    = Channel.fromPath('assets/input_pipeline/bidsignore_list.txt')
+    ch_ignore_remove = Channel.fromPath('assets/input_pipeline/bidsignore_remove.txt', checkIfExists: false)
 
 
 
@@ -162,7 +165,7 @@ workflow NEUROMRIPREP {
 
     //bidsvalidator
 
-    //BIDS_VALIDATOR(ch_bidsval_in)
+    BIDS_VALIDATOR(ch_bidsval_in)
 
 
 
@@ -186,11 +189,10 @@ workflow NEUROMRIPREP {
             .map { meta, ds -> tuple(meta, ds) }
 
 
-        MRIQC_PARTICIPANT(
-            ch_mriqc_in
-        )
+        MRIQC_PARTICIPANTS(ch_mriqc_in, params.mriqc_vpn_file)
 
-        ch_mriqc_part_dirs = MRIQC_PARTICIPANT.out.mriqc_out
+
+        ch_mriqc_part_dirs = MRIQC_PARTICIPANTS.out.mriqc_out
             .map { meta, outdir -> outdir }
             .collect()
             .map { dirs -> dirs.toSet() }   
@@ -244,7 +246,7 @@ workflow NEUROMRIPREP {
                 : Channel.value(file("${projectDir}/assets/empty_bids_filter.json"))
 
 
-            // FreeSurfer license (required by fMRIPrep)
+            // FreeSurfer license
             def ch_fs_license = Channel.value( file(params.fmriprep_fs_license) )
 
             // Compose inputs for module
@@ -257,16 +259,62 @@ workflow NEUROMRIPREP {
 
             // Run fMRIPrep
             FMRIPREP(ch_fmriprep_in)
+
+
+            if( params.stop_fmriprep ) {
+
+                log.warn "[BIDS] Stopping after FMRIPREP validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
+            
+            } else {
+
+                // Dataset dir (single value)
+                def ch_pydeface_ds = ch_bids_dataset_after_ignore
+
+                // Per-subject/session meta (you already have it via ch_input)
+                def ch_pydeface_meta = ch_input
+                    .map { meta, _ -> meta }
+                    .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
+
+                // Optional restriction to VPN list file (one subject per line, allow "sub-XXX")
+                if( params.pydeface_vpn_file ) {
+                    def vpn_set = file(params.pydeface_vpn_file)
+                        .text
+                        .readLines()
+                        .collect { it.replace('\r','').trim() }
+                        .findAll { it }
+                        .collect { it.replaceFirst(/^sub-/, '') }
+                        .toSet()
+
+                    ch_pydeface_meta = ch_pydeface_meta.filter { meta ->
+                        vpn_set.contains(meta.subject.toString().replaceFirst(/^sub-/, ''))
+                    }
+                }
+
+                /*
+                * Enumerate anat NIfTIs per (subject, session) from the BIDS dataset.
+                * Emits one task per nifti file -> parallel + resumable.
+                */
+                def ch_pydeface_in = ch_pydeface_meta
+                    .combine(ch_pydeface_ds)
+                    .flatMap { meta, ds ->
+                        def anatDir = new File(ds.toString(), "sub-${meta.subject}/ses-${meta.session}/anat")
+                        if( !anatDir.exists() ) return []
+
+                        def niiFiles = anatDir
+                            .listFiles()
+                            ?.findAll { it.name.endsWith('.nii.gz') && !it.name.endsWith('_defaced.nii.gz') }
+                            ?: []
+
+                        return niiFiles.collect { f -> tuple(meta, ds, f.toPath()) } 
+                    }
+
+
+                // run pydeface
+                PYDEFACE(ch_pydeface_in)
+
+            }
         }
-
-
-
-
     }
-
-
-
-
 
 
 
@@ -274,6 +322,7 @@ workflow NEUROMRIPREP {
     
     emit:
     bids_output = postproc_out
+    dcm2bids_merge = ch_bids_dataset
     //derivatives = derivatives
     versions    = ch_versions
 }

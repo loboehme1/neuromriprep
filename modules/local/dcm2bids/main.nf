@@ -21,6 +21,8 @@ process DCM2BIDS {
 
     label 'process_single'
 
+
+
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/dcm2bids_3.2.0.sif' }"
 
     input:

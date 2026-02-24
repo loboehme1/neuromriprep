@@ -10,8 +10,8 @@ process MRIQC_PARTICIPANT {
 
     output:
     tuple val(meta), path("mriqc_out_${meta.subject}"), emit: mriqc_out
-    path "mriqc_participant.log", emit: log
-    path "versions.yml", emit: versions
+    path "mriqc_participant.log"                      , emit: mriqc_log
+    path "versions.yml"                               , emit: versions
 
     script:
     def args        = task.ext.args ?: ''
@@ -26,11 +26,6 @@ process MRIQC_PARTICIPANT {
     """
     set -euo pipefail
 
-    echo "[CANARY] started \$(date)" > mriqc_participant.log
-    echo "[DEBUG] inside container? APPTAINER_NAME=\${APPTAINER_NAME:-} SINGULARITY_NAME=\${SINGULARITY_NAME:-}" | tee -a mriqc_participant.log
-    echo "[DEBUG] PATH=\$PATH" | tee -a mriqc_participant.log
-
-    echo "[INFO] mriqc_cmd=${mriqc_cmd}" | tee -a mriqc_participant.log
     command -v ${mriqc_cmd} 2>&1 | tee -a mriqc_participant.log || true
     ${mriqc_cmd} --version 2>&1 | tee -a mriqc_participant.log
 
