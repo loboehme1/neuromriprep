@@ -31,6 +31,7 @@ workflow MRIQC_PARTICIPANTS {
 
   emit:
     mriqc_out = run.mriqc_out
+    mriqc_out_pub = run.mriqc_publish
     mriqc_log = run.mriqc_log 
     versions  = run.versions
 }

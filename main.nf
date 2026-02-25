@@ -66,13 +66,12 @@ workflow NFCORE_NEUROMRIPREP {
     //NEUROMRIPREP.out.copied_dicoms.view { it }
 
     emit:
-    //copied_dicoms  = NEUROMRIPREP.out.copied_dicoms
-    bids_output    = NEUROMRIPREP.out.bids_output
     dcm2bids_merge = NEUROMRIPREP.out.dcm2bids_merge
-    //derivatives    = NEUROMRIPREP.out.derivatives
-    //log            = NEUROMRIPREP.out.log
+    mriqc_part_publish = NEUROMRIPREP.out.mriqc_part_publish
+    mriqc_group_publish = NEUROMRIPREP.out.mriqc_group_publish
+    fmriprep_publish = NEUROMRIPREP.out.fmriprep_publish
+    pydeface_publish = NEUROMRIPREP.out.pydeface_publish
     versions       = NEUROMRIPREP.out.versions
-    //multiqc_report = NEUROMRIPREP.out.multiqc_report
     multiqc_report = Channel.empty() //PLACEHOLDER
 }
 /*
@@ -100,10 +99,12 @@ workflow {
         params.show_hidden
     )
     */
+
     //
     // WORKFLOW: Run main workflow
     //
     NFCORE_NEUROMRIPREP ()
+
     //
     // SUBWORKFLOW: Run completion tasks
     //
@@ -120,14 +121,58 @@ workflow {
     */
 
     publish:
-    merge_out = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
+    merge_out          = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
+    mriqc_part_out     = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
+    mriqc_group_out    = NFCORE_NEUROMRIPREP.out.mriqc_group_publish
+    fmriprep_out       = NFCORE_NEUROMRIPREP.out.fmriprep_publish
+    pydeface_out       = NFCORE_NEUROMRIPREP.out.pydeface_publish
 }
 
+
+// output specified in correct way as in bash files
+
 output {
-    merge_out {
-        path 'merge_out'
+
+  merge_out {
+    path { f -> f >> f.name }
+  }
+
+  // ---- MRIQC participant: strip "mriqc_out_<sub>/" and put into derivatives/mriqc/ ----
+  mriqc_part_out {
+    path { f ->
+      def rel = f.toString().replaceFirst(/^.*\/mriqc_out_[^\/]+\//, '')
+      if( !rel ) return null
+      f >> "derivatives/mriqc/${rel}"
     }
+  }
+
+  // ---- MRIQC group: strip wrapper dir and put into derivatives/mriqc/ (or mriqc_group/) ----
+  mriqc_group_out {
+    path { f ->
+      def rel = f.toString().replaceFirst(/^.*\/mriqc_group_out\//, '')
+      if( !rel ) return null
+      f >> "derivatives/mriqc/${rel}"        // or: "derivatives/mriqc_group/${rel}"
+    }
+  }
+
+  // ---- FMRIPREP: strip "fmriprep_out/" and put into derivatives/fmriprep/ ----
+  fmriprep_out {
+    path { f ->
+      def rel = f.toString().replaceFirst(/^.*\/fmriprep_out\//, '')
+      if( !rel ) return null
+      f >> "derivatives/fmriprep/${rel}"
+    }
+  }
+
+  // ---- PYDEFACE: publish into BIDS-like relative path (starting at sub-...) ----
+  pydeface_out {
+    path { f ->
+      def rel = f.toString().replaceFirst(/^.*\/(sub-[^\/].*)$/, '$1')
+      f >> rel
+    }
+  }
 }
+
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

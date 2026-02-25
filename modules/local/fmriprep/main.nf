@@ -12,6 +12,12 @@ process FMRIPREP {
         return "--cleanenv -B ${tf_host}:${tf_cont}"
     }
 
+    /*
+    publishDir {
+        params.fmriprep_outdir ?: "${params.outdir}/derivatives/fmriprep"
+    }, mode: 'copy', overwrite: true
+    */
+
     input:
     tuple val(meta), 
     path(bids_dataset, stageAs: 'input_bids'),
@@ -21,6 +27,7 @@ process FMRIPREP {
 
     output:
     tuple val(meta), path("fmriprep_out_sub-${meta.subject}"), emit: out
+    path("fmriprep_out/**"),                   emit: fmriprep_publish
     path "versions_sub-${meta.subject}.yml", emit: versions
     path "logs/sub-${meta.subject}_out.log", emit: log_out
     path "logs/sub-${meta.subject}_err.log", emit: log_err

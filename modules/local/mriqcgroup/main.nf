@@ -4,12 +4,17 @@ process MRIQC_GROUP {
     label 'process_medium'
 
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
-
+  /*
+    publishDir {
+        params.mriqc_group_outdir ?: "${params.outdir}/derivatives/mriqc"
+    }, mode: 'copy', overwrite: true
+*/
     input:
     tuple val(meta), path(bids_dataset, stageAs: 'input_bids'), path(participant_dirs, stageAs: 'participants/*')
 
     output:
-    tuple val(meta), path("mriqc_group_out"), emit: mriqc_group_out
+    tuple val(meta), path("mriqc_group_out/"), emit: mriqc_group_out
+    path("mriqc_group_out/**"),     emit: mriqc_group_publish
     path "mriqc_group.log", emit: log
     path "mriqc_group.errwarn.log", emit: errwarn
     path "versions.yml", emit: versions

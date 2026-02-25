@@ -9,9 +9,11 @@ process PYDEFACE {
     memory {  params.pydeface_mem  ?: '8 GB' }
     time   {  params.pydeface_time ?: '2h' }
 
+    /*
     publishDir {
         params.pydeface_outdir ?: "${params.outdir}/derivatives/pydeface"
     }, mode: 'copy', overwrite: true
+    */
 
     input:
     tuple val(meta), path(bids_dir), path(nifti)
@@ -51,7 +53,7 @@ process PYDEFACE {
       echo
     } | tee -a "$out_log"
 
-    # Skip if input already looks defaced
+    # Skip if input already looks defaced --> does this work?
     if [[ "$base" == *"_defaced" ]]; then
       echo "[SKIP] Input already looks defaced: $base" | tee -a "$out_log"
       : >> "$err_log"

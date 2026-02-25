@@ -10,8 +10,10 @@ process MERGE_BIDS_DATASET {
     path dwi_adc_sub_dirs,  stageAs: 'in_adc/*'
     path log_files,         stageAs: 'in_logs/*'
 
+    //output folder and contents to get structured outputs
     output:
-    path "bids_dataset", emit: bids_dataset
+    path "bids_dataset"   , emit: bids_dataset
+    path "bids_dataset/*" , emit: bids_dataset_items
 
 
 
@@ -24,11 +26,11 @@ process MERGE_BIDS_DATASET {
     mkdir -p bids_dataset/logs_dcm2bids
 
     cat > bids_dataset/dataset_description.json <<'EOF'
-{
-  "Name": "neuromriprep_dataset",
-  "BIDSVersion": "1.9.0"
-}
-EOF
+    {
+      "Name": "neuromriprep_dataset",
+      "BIDSVersion": "1.9.0"
+    }
+    EOF
 
     # Merge subjects (FOLLOW symlinks + copy contents)
     for s in ${sub_dirs}; do

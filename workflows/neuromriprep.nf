@@ -139,7 +139,8 @@ workflow NEUROMRIPREP {
         ch_logs
     )
 
-    ch_bids_dataset = MERGE_BIDS_DATASET.out.bids_dataset
+    ch_bids_dataset = MERGE_BIDS_DATASET.out.bids_dataset                          //for use
+    ch_bids_dataset_items = MERGE_BIDS_DATASET.out.bids_dataset_items.flatten()   //for publishing
 
 
     ch_dataset_meta = ch_samplesheet.map { meta, _ -> meta }.first().map { meta -> meta + [ id: 'dataset' ] }
@@ -169,6 +170,14 @@ workflow NEUROMRIPREP {
 
 
 
+    // channels so it does not break when flags false
+    def ch_mriqc_part_publish  = Channel.empty()
+    def ch_mriqc_group_publish = Channel.empty()
+    def ch_fmriprep_publish    = Channel.empty()
+    def ch_pydeface_publish    = Channel.empty()
+
+
+
     // Print counts + log location to console -> stop so human can look at logs
 
     if( params.stop_bidsval) {
@@ -191,6 +200,8 @@ workflow NEUROMRIPREP {
 
         MRIQC_PARTICIPANTS(ch_mriqc_in, params.mriqc_vpn_file)
 
+        ch_mriqc_part_publish = MRIQC_PARTICIPANTS.out.mriqc_out_pub.flatten()
+
 
         ch_mriqc_part_dirs = MRIQC_PARTICIPANTS.out.mriqc_out
             .map { meta, outdir -> outdir }
@@ -203,11 +214,13 @@ workflow NEUROMRIPREP {
 
         MRIQC_GROUP(ch_mriqc_group_in)
 
+        ch_mriqc_group_publish = MRIQC_GROUP.out.mriqc_group_publish.flatten()
+
 
 
         if( params.stop_mriqc) {
 
-            log.warn "[BIDS] Stopping after BIDS validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
+            log.warn "[MRIQC] Stopping after MRIQC. After resolving the issues re-run with -resume and --stop_multiqc false to continue."
         } else {
             // Dataset dir (single value)
             ch_fmriprep_ds = ch_bids_dataset_after_ignore
@@ -260,10 +273,12 @@ workflow NEUROMRIPREP {
             // Run fMRIPrep
             FMRIPREP(ch_fmriprep_in)
 
+            ch_fmriprep_publish = FMRIPREP.out.fmriprep_publish.flatten()
+
 
             if( params.stop_fmriprep ) {
 
-                log.warn "[BIDS] Stopping after FMRIPREP validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
+                log.warn "[FMRIPREP] Stopping after FMRIPREP. After resolving the issues re-run with -resume and --stop_fmriprep false to continue."
             
             } else {
 
@@ -312,19 +327,20 @@ workflow NEUROMRIPREP {
                 // run pydeface
                 PYDEFACE(ch_pydeface_in)
 
+                ch_pydeface_publish = PYDEFACE.out.defaced.flatten()
+
             }
         }
     }
 
-
-
-
     
     emit:
-    bids_output = postproc_out
-    dcm2bids_merge = ch_bids_dataset
-    //derivatives = derivatives
-    versions    = ch_versions
+    dcm2bids_merge      = ch_bids_dataset_items
+    mriqc_part_publish  = ch_mriqc_part_publish
+    mriqc_group_publish = ch_mriqc_group_publish
+    fmriprep_publish    = ch_fmriprep_publish
+    pydeface_publish    = ch_pydeface_publish
+    versions            = ch_versions
 }
 
 
