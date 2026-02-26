@@ -92,6 +92,8 @@ process FMRIPREP {
       --skull-strip-fixed-seed \\
       --output-spaces ${all_spaces} \\
       --work-dir "${wdir}" \\
+      --ignore fieldmaps \\
+      --fs-no-reconall \\
       2>&1 | tee -a logs/sub-${participant}_out.log
 
     grep -i -e "warning" -e "error" logs/sub-${participant}_out.log > logs/sub-${participant}_err.log || true

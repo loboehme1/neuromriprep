@@ -108,7 +108,6 @@ workflow NEUROMRIPREP {
 
     ch_bids_raw.view { bids_dir ->
         log.info "[DEBUG] ch_bids_raw item: ${bids_dir} (name=${bids_dir.name})"
-        // or just: "[DEBUG] ch_bids_raw: ${bids_dir}"
     }
 
 
@@ -166,7 +165,7 @@ workflow NEUROMRIPREP {
 
     //bidsvalidator
 
-    BIDS_VALIDATOR(ch_bidsval_in)
+    //BIDS_VALIDATOR(ch_bidsval_in)
 
 
 
@@ -200,8 +199,14 @@ workflow NEUROMRIPREP {
 
         MRIQC_PARTICIPANTS(ch_mriqc_in, params.mriqc_vpn_file)
 
-        ch_mriqc_part_publish = MRIQC_PARTICIPANTS.out.mriqc_out_pub.flatten()
+        // restructure for output to look as expected
+        ch_mriqc_part_pub = MRIQC_PARTICIPANTS.out.mriqc_out_pub.flatten()
 
+        ch_mriqc_part_publish = ch_mriqc_part_pub.map { p ->
+            def rel = p.toString().replaceFirst(/^.*\/mriqc_out_[^\/]+\//, '')
+            [ file: p, rel: rel ]
+        }
+        
 
         ch_mriqc_part_dirs = MRIQC_PARTICIPANTS.out.mriqc_out
             .map { meta, outdir -> outdir }
@@ -216,6 +221,10 @@ workflow NEUROMRIPREP {
 
         ch_mriqc_group_publish = MRIQC_GROUP.out.mriqc_group_publish.flatten()
 
+        ch_mriqc_group_publish = ch_mriqc_group_publish.map { p ->
+            def rel = p.toString().replaceFirst(/^.*\/mriqc_group_out/, '')
+            return [ file: p, rel: rel ]
+        }
 
 
         if( params.stop_mriqc) {
@@ -274,6 +283,18 @@ workflow NEUROMRIPREP {
             FMRIPREP(ch_fmriprep_in)
 
             ch_fmriprep_publish = FMRIPREP.out.fmriprep_publish.flatten()
+
+            
+            ch_fmriprep_publish = ch_fmriprep_publish.map { p ->
+                def rel = p.toString().replaceFirst(/^.*[\\\/]fmriprep_out_sub-[^\\\/]+[\\\/]+/, '')
+                return [ file: p, rel: rel ]
+            }
+
+            ch_fmriprep_publish.view { bids_dir ->
+                log.info "[DEBUG] ch_fmriprep_item: ${bids_dir} (name=${bids_dir.name})"
+            }
+
+            
 
 
             if( params.stop_fmriprep ) {

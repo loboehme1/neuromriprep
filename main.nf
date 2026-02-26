@@ -120,6 +120,8 @@ workflow {
     )
     */
 
+    
+
     publish:
     merge_out          = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
     mriqc_part_out     = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
@@ -133,44 +135,40 @@ workflow {
 
 output {
 
-  merge_out {
-    path { f -> f >> f.name }
-  }
-
-  // ---- MRIQC participant: strip "mriqc_out_<sub>/" and put into derivatives/mriqc/ ----
-  mriqc_part_out {
-    path { f ->
-      def rel = f.toString().replaceFirst(/^.*\/mriqc_out_[^\/]+\//, '')
-      if( !rel ) return null
-      f >> "derivatives/mriqc/${rel}"
+    merge_out {
+        path { f -> f >> f.name }
     }
-  }
 
-  // ---- MRIQC group: strip wrapper dir and put into derivatives/mriqc/ (or mriqc_group/) ----
-  mriqc_group_out {
-    path { f ->
-      def rel = f.toString().replaceFirst(/^.*\/mriqc_group_out\//, '')
-      if( !rel ) return null
-      f >> "derivatives/mriqc/${rel}"        // or: "derivatives/mriqc_group/${rel}"
+    // ---- MRIQC participant: strip "mriqc_out_<sub>/" and put into derivatives/mriqc/ ----
+    mriqc_part_out {
+        path { x ->
+            x.file >> "derivatives/mriqc/${x.rel}"   // no trailing slash
+        }
     }
-  }
 
-  // ---- FMRIPREP: strip "fmriprep_out/" and put into derivatives/fmriprep/ ----
-  fmriprep_out {
-    path { f ->
-      def rel = f.toString().replaceFirst(/^.*\/fmriprep_out\//, '')
-      if( !rel ) return null
-      f >> "derivatives/fmriprep/${rel}"
-    }
-  }
 
-  // ---- PYDEFACE: publish into BIDS-like relative path (starting at sub-...) ----
-  pydeface_out {
-    path { f ->
-      def rel = f.toString().replaceFirst(/^.*\/(sub-[^\/].*)$/, '$1')
-      f >> rel
+    // ---- MRIQC group: strip wrapper dir and put into derivatives/mriqc/ (or mriqc_group/) ----
+    mriqc_group_out {
+        path { x ->
+            x.file >> "derivatives/mriqc/${x.rel}"   // no trailing slash
+        }
     }
-  }
+
+
+    // ---- FMRIPREP: strip "fmriprep_out/" and put into derivatives/fmriprep/ ----
+    fmriprep_out {
+        path { x ->
+            x.file >> "derivatives/mriqc/${x.rel}"   // no trailing slash
+        }
+    }
+
+    // ---- PYDEFACE: publish into BIDS-like relative path (starting at sub-...) ----
+    pydeface_out {
+        path { f ->
+        def rel = f.toString().replaceFirst(/^.*\/(sub-[^\/].*)$/, '$1')
+        f >> rel
+        }
+    }
 }
 
 
