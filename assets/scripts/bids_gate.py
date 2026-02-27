@@ -3,32 +3,75 @@ import argparse
 import json
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 ISSUE_RE = re.compile(r"\[(WARNING|ERROR)\]\s+([A-Z0-9_]+)\b(.*)")
+FILELINE_RE = re.compile(r"^\s*(/[^ \t]+)") 
 
-FILELINE_RE = re.compile(r"^\s*(/[^ \t]+)")
+def split_codes_line(line: str) -> Optional[str]:
+    # Allow "WARNING:CODE" or just "CODE"
+    s = line.strip()
+    if not s or s.startswith("#"):
+        return None
+    s = s.split("#", 1)[0].strip()
+    if not s:
+        return None
+    if ":" in s:
+        left, right = s.split(":", 1)
+        # If it's WARNING:CODE, keep CODE
+        if left.strip().upper() in {"WARNING", "ERROR"}:
+            return right.strip()
+    return s
 
-DEFAULT_FAIL_WARNINGS = {
-    # defaults
-}
+def load_allowlisted_warnings(path: Optional[str]) -> Tuple[Path, set]:
+    if not path:
+        # default: empty allowlist => all warnings fail
+        p = Path("warnings_ok.txt").resolve()
+        return p, set()
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        raise FileNotFoundError(f"Allowlist file not found: {p}")
+    codes = set()
+    for line in p.read_text(errors="replace").splitlines():
+        code = split_codes_line(line)
+        if code:
+            codes.add(code)
+    return p, codes
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Gate BIDS Validator output (fail on policy).")
-    p.add_argument("--log", required=True, help="Path to bids-validator stdout/stderr log")
-    p.add_argument("--json", dest="json_out", default=None, help="Write JSON report to this path")
-    p.add_argument("--policy", choices=["nfcore", "strict", "custom"], default="nfcore",
-                   help="nfcore: fail on ERROR only; strict: fail on ERROR + common warnings; custom: use lists")
-    p.add_argument("--fail-on-warning", default="", help="Comma-separated warning codes that should fail")
-    p.add_argument("--ignore-warning", default="", help="Comma-separated warning codes to always ignore")
-    p.add_argument("--no-fail-on-error", action="store_true", help="Do not fail on ERROR (not recommended)")
-    return p.parse_args()
+def load_helpers(path: Optional[str]) -> Dict[str, str]:
+    if not path:
+        return {}
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        raise FileNotFoundError(f"Helpers file not found: {p}")
 
-def split_codes(s: str) -> List[str]:
-    if not s.strip():
-        return []
-    return [x.strip() for x in s.split(",") if x.strip()]
+    # Support JSON mapping or TSV-like mapping
+    if p.suffix.lower() == ".json":
+        obj = json.loads(p.read_text(errors="replace"))
+        if isinstance(obj, dict):
+            return {str(k).strip(): str(v).strip() for k, v in obj.items()}
+        raise ValueError("Helpers JSON must be an object mapping CODE -> help text")
+
+    helpers: Dict[str, str] = {}
+    for line in p.read_text(errors="replace").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        # TSV preferred; fall back to splitting on first whitespace
+        if "\t" in s:
+            code, msg = s.split("\t", 1)
+        else:
+            parts = s.split(None, 1)
+            if len(parts) == 1:
+                continue
+            code, msg = parts[0], parts[1]
+        code = code.strip()
+        msg = msg.strip()
+        if code and msg:
+            helpers[code] = msg
+    return helpers
 
 def parse_log(text: str) -> List[Dict[str, Any]]:
     issues: List[Dict[str, Any]] = []
@@ -37,7 +80,6 @@ def parse_log(text: str) -> List[Dict[str, Any]]:
     def flush():
         nonlocal cur
         if cur:
-            # normalize / dedupe file list
             cur["files"] = sorted(set(cur["files"]))
             cur["message"] = cur["message"].strip()
             issues.append(cur)
@@ -64,121 +106,167 @@ def parse_log(text: str) -> List[Dict[str, Any]]:
 
         cur["raw"].append(line)
 
-        # Collect file path references that begin with "/"
         s = line.strip()
         fm = FILELINE_RE.match(s)
         if fm:
             cur["files"].append(fm.group(1))
         else:
-            # Accumulate message context (but keep it short-ish)
+            # keep extra context lines (but skip generic "Please visit ..." noise)
             if s and not s.startswith("Please visit") and not s.startswith("See Section"):
-                # append additional explanatory lines
                 cur["message"] += ("\n" + s)
 
     flush()
     return issues
 
-def apply_policy(
-    issues: List[Dict[str, Any]],
-    fail_on_error: bool,
-    fail_warnings: List[str],
-    ignore_warnings: List[str],
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    ignore_set = set(ignore_warnings)
-    fail_warn_set = set(fail_warnings)
+def group_by_code(items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    g: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for it in items:
+        g[it["code"]].append(it)
+    return g
 
-    important: List[Dict[str, Any]] = []
-    informational: List[Dict[str, Any]] = []
+def short_msg(it: Dict[str, Any]) -> str:
+    # first line only
+    msg = (it.get("message") or "").strip().splitlines()[0] if it.get("message") else ""
+    return msg
 
-    for it in issues:
-        sev = it["severity"]
-        code = it["code"]
+def render_group(
+    severity: str,
+    code: str,
+    items: List[Dict[str, Any]],
+    helpers: Dict[str, str],
+    max_files: int = 8,
+) -> str:
+    n = len(items)
+    # gather files across occurrences
+    files = []
+    for it in items:
+        files.extend(it.get("files", []))
+    files = sorted(set(files))
+    files_preview = files[:max_files]
+    more = f" (+{len(files)-len(files_preview)} more)" if len(files) > len(files_preview) else ""
+    help_msg = helpers.get(code)
 
-        if sev == "WARNING" and code in ignore_set:
-            informational.append(it)
-            continue
-
-        if sev == "ERROR":
-            (important if fail_on_error else informational).append(it)
-            continue
-
-        # WARNING
-        if code in fail_warn_set:
-            important.append(it)
-        else:
-            informational.append(it)
-
-    return important, informational
+    out = []
+    out.append(f"- [{severity}] {code} (occurrences: {n}, files: {len(files)})")
+    first = short_msg(items[0])
+    if first:
+        out.append(f"  {first}")
+    if files_preview:
+        out.append("  Files:")
+        for f in files_preview:
+            out.append(f"    - {f}")
+        if more:
+            out.append(f"    {more}")
+    if help_msg:
+        out.append(f"  Help: {help_msg}")
+    return "\n".join(out)
 
 def main() -> int:
-    args = parse_args()
-    log_path = Path(args.log)
+    ap = argparse.ArgumentParser(description="Gate BIDS Validator output: fail on ERROR and on non-allowlisted WARNINGs.")
+    ap.add_argument("--log", required=True, help="Path to bids-validator stdout/stderr log")
+    ap.add_argument("--allow-warnings", required=True, help="File listing WARNING codes that are OK (allowlist). All other warnings fail.")
+    ap.add_argument("--helpers", default=None, help="Optional file mapping CODE -> help message (TSV or JSON).")
+    ap.add_argument("--json-out", default="bids_qc_report.json", help="Write JSON report to this path")
+    ap.add_argument("--summary-out", default="bids_qc_summary.txt", help="Write human summary to this path")
+    ap.add_argument("--max-files", type=int, default=8, help="Max file paths to print per code")
+    args = ap.parse_args()
+
+    log_path = Path(args.log).expanduser().resolve()
     if not log_path.exists():
         print(f"[bids-gate] ERROR: log not found: {log_path}", file=sys.stderr)
         return 2
 
+    allow_path, allow_codes = load_allowlisted_warnings(args.allow_warnings)
+    helpers = load_helpers(args.helpers)
+
     text = log_path.read_text(errors="replace")
     issues = parse_log(text)
 
-    # policy -> warning fail set
-    if args.policy == "nfcore":
-        fail_warnings = []
-    elif args.policy == "strict":
-        fail_warnings = sorted(DEFAULT_FAIL_WARNINGS)
-    else:  # custom
-        fail_warnings = []
+    errors = [x for x in issues if x["severity"] == "ERROR"]
+    warnings = [x for x in issues if x["severity"] == "WARNING"]
 
-    # apply CLI additions
-    fail_warnings += split_codes(args.fail_on_warning)
-    ignore_warnings = split_codes(args.ignore_warning)
+    warnings_skipped = [w for w in warnings if w["code"] in allow_codes]
+    warnings_attention = [w for w in warnings if w["code"] not in allow_codes]
 
-    # dedupe
-    fail_warnings = sorted(set(fail_warnings))
-    ignore_warnings = sorted(set(ignore_warnings))
+    unique_errors = sorted(set(x["code"] for x in errors))
+    unique_warnings = sorted(set(x["code"] for x in warnings))
 
-    important, informational = apply_policy(
-        issues=issues,
-        fail_on_error=(not args.no_fail_on_error),
-        fail_warnings=fail_warnings,
-        ignore_warnings=ignore_warnings,
-    )
-
-    # Build report
-    report = {
-        "log": str(log_path),
-        "counts": {
-            "total": len(issues),
-            "important": len(important),
-            "informational": len(informational),
-            "errors": sum(1 for x in issues if x["severity"] == "ERROR"),
-            "warnings": sum(1 for x in issues if x["severity"] == "WARNING"),
-        },
-        "policy": {
-            "policy": args.policy,
-            "fail_on_error": (not args.no_fail_on_error),
-            "fail_warnings": fail_warnings,
-            "ignore_warnings": ignore_warnings,
-        },
-        "important": important,
-        "informational": informational,
+    counts = {
+        "errors": len(errors),
+        "warnings": len(warnings),
+        "warnings_skipped_due_to_unimportant": len(warnings_skipped),
+        "warnings_need_attention": len(warnings_attention),
+        "unique_errors": len(unique_errors),
+        "unique_warnings": len(unique_warnings),
     }
 
-    # Human summary
-    print(f"[bids-gate] total issues: {report['counts']['total']} "
-          f"(errors={report['counts']['errors']}, warnings={report['counts']['warnings']})")
-    print(f"[bids-gate] IMPORTANT issues: {report['counts']['important']}")
-    if important:
-        print("\n[bids-gate] Failing on:")
-        for it in important:
-            files = ", ".join(it["files"][:5]) + (" …" if len(it["files"]) > 5 else "")
-            print(f"  - {it['severity']} {it['code']}" + (f" | {files}" if files else ""))
+    failing = errors + warnings_attention
+    check_passed = (len(failing) == 0)
+
+    # Build human summary
+    summary_lines: List[str] = []
+    summary_lines.append("[bids-gate] BIDS Validator Quality Gate")
+    summary_lines.append(f"[bids-gate] Log: {log_path}")
+    summary_lines.append(f"[bids-gate] Allowlist (warnings OK): {allow_path}")
+    if args.helpers:
+        summary_lines.append(f"[bids-gate] Helpers: {Path(args.helpers).expanduser().resolve()}")
+    summary_lines.append("")
+    summary_lines.append("[bids-gate] Counts:")
+    for k, v in counts.items():
+        summary_lines.append(f"  - {k}: {v}")
+    summary_lines.append(f"  - check_passed: {check_passed}")
+
+    # Always print skipped warnings (short form) for transparency
+    summary_lines.append("")
+    summary_lines.append("[bids-gate] Warnings marked OK by allowlist (skipped):")
+    if warnings_skipped:
+        g = group_by_code(warnings_skipped)
+        for code in sorted(g.keys()):
+            items = g[code]
+            summary_lines.append(f"  - {code} (occurrences: {len(items)})")
     else:
-        print("[bids-gate] No failing issues found.")
+        summary_lines.append("  (none)")
 
-    if args.json_out:
-        Path(args.json_out).write_text(json.dumps(report, indent=2))
+    # Issues that cause failure: errors + attention warnings
+    summary_lines.append("")
+    summary_lines.append("[bids-gate] Issues requiring attention (cause workflow to stop):")
+    if failing:
+        if errors:
+            summary_lines.append("Errors:")
+            gE = group_by_code(errors)
+            for code in sorted(gE.keys()):
+                summary_lines.append(render_group("ERROR", code, gE[code], helpers, max_files=args.max_files))
+        if warnings_attention:
+            summary_lines.append("")
+            summary_lines.append("Warnings:")
+            gW = group_by_code(warnings_attention)
+            for code in sorted(gW.keys()):
+                summary_lines.append(render_group("WARNING", code, gW[code], helpers, max_files=args.max_files))
+    else:
+        summary_lines.append("  (none)")
 
-    return 1 if important else 0
+    summary_text = "\n".join(summary_lines).rstrip() + "\n"
+    Path(args.summary_out).write_text(summary_text)
+
+    # JSON report (full detail)
+    report = {
+        "log": str(log_path),
+        "allowlist": str(allow_path),
+        "helpers": str(Path(args.helpers).expanduser().resolve()) if args.helpers else None,
+        "check_passed": check_passed,
+        "counts": counts,
+        "unique": {
+            "errors": unique_errors,
+            "warnings": unique_warnings,
+        },
+        "skipped_warnings": warnings_skipped,
+        "attention_warnings": warnings_attention,
+        "errors": errors,
+    }
+    Path(args.json_out).write_text(json.dumps(report, indent=2))
+
+    # Exit: fail if any error or any non-allowlisted warning
+    return 0 if check_passed else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

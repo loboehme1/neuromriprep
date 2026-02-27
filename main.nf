@@ -66,13 +66,14 @@ workflow NFCORE_NEUROMRIPREP {
     //NEUROMRIPREP.out.copied_dicoms.view { it }
 
     emit:
-    dcm2bids_merge = NEUROMRIPREP.out.dcm2bids_merge
-    mriqc_part_publish = NEUROMRIPREP.out.mriqc_part_publish
+    dcm2bids_merge      = NEUROMRIPREP.out.dcm2bids_merge
+    bidsgate_report     = NEUROMRIPREP.out.bidsgate_report
+    mriqc_part_publish  = NEUROMRIPREP.out.mriqc_part_publish
     mriqc_group_publish = NEUROMRIPREP.out.mriqc_group_publish
-    fmriprep_publish = NEUROMRIPREP.out.fmriprep_publish
-    pydeface_publish = NEUROMRIPREP.out.pydeface_publish
-    versions       = NEUROMRIPREP.out.versions
-    multiqc_report = Channel.empty() //PLACEHOLDER
+    fmriprep_publish    = NEUROMRIPREP.out.fmriprep_publish
+    pydeface_publish    = NEUROMRIPREP.out.pydeface_publish
+    versions            = NEUROMRIPREP.out.versions
+    multiqc_report      = Channel.empty() //PLACEHOLDER
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -124,6 +125,7 @@ workflow {
 
     publish:
     merge_out          = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
+    bidsqc_out         = NFCORE_NEUROMRIPREP.out.bidsgate_report
     mriqc_part_out     = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
     mriqc_group_out    = NFCORE_NEUROMRIPREP.out.mriqc_group_publish
     fmriprep_out       = NFCORE_NEUROMRIPREP.out.fmriprep_publish
@@ -135,38 +137,43 @@ workflow {
 
 output {
 
+    // BIDS output
     merge_out {
         path { f -> f >> f.name }
     }
 
-    // ---- MRIQC participant: strip "mriqc_out_<sub>/" and put into derivatives/mriqc/ ----
+    // BIDSGATE
+    bidsqc_out {
+        path {f -> f >> f.name }
+    }
+
+    // MRIQC participant output --> derivatives/mriqc
     mriqc_part_out {
         path { x ->
-            x.file >> "derivatives/mriqc/${x.rel}"   // no trailing slash
+            x.file >> "derivatives/mriqc/${x.rel}"   
         }
     }
 
 
-    // ---- MRIQC group: strip wrapper dir and put into derivatives/mriqc/ (or mriqc_group/) ----
+    // MRIQC group output --> derivatives/mriqc
     mriqc_group_out {
         path { x ->
-            x.file >> "derivatives/mriqc/${x.rel}"   // no trailing slash
+            x.file >> "derivatives/mriqc/${x.rel}"  
         }
     }
 
 
-    // ---- FMRIPREP: strip "fmriprep_out/" and put into derivatives/fmriprep/ ----
+    // FMRIPREP output -->
     fmriprep_out {
         path { x ->
-            x.file >> "derivatives/mriqc/${x.rel}"   // no trailing slash
+            x.file >> "derivatives/fmriprep/${x.rel}"   
         }
     }
 
-    // ---- PYDEFACE: publish into BIDS-like relative path (starting at sub-...) ----
+    // PYDEFACE output -->
     pydeface_out {
-        path { f ->
-        def rel = f.toString().replaceFirst(/^.*\/(sub-[^\/].*)$/, '$1')
-        f >> rel
+        path { x ->
+            x.file >> "derivatives/pydefaces/${x.rel}"   
         }
     }
 }

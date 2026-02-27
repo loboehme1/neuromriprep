@@ -8,6 +8,7 @@ include { DCM2BIDS_CONFIG   } from '../modules/local/dcm2bidsconfig'
 include { DCM2BIDS_POSTPROC } from '../modules/local/dcm2bidspostprocess'
 include { MERGE_BIDS_DATASET} from '../modules/local/mergebidsdataset'
 include { BIDS_VALIDATOR    } from '../modules/local/bidsvalidator'
+include { BIDS_QC_GATE      } from '../modules/local/bidsqcgate'
 include { BIDSIGNORE        } from '../modules/local/bidsignore'
 include { MRIQC_PARTICIPANT } from '../modules/local/mriqcparticipant'
 include { MRIQC_GROUP       } from '../modules/local/mriqcgroup'
@@ -165,21 +166,43 @@ workflow NEUROMRIPREP {
 
     //bidsvalidator
 
-    //BIDS_VALIDATOR(ch_bidsval_in)
+    BIDS_VALIDATOR(ch_bidsval_in)
 
+    ch_bidsval_log = BIDS_VALIDATOR.out.log
 
+    def gate_py    = file(params.bids_qc_script)
+    def allowlist  = file(params.bids_qc_allowlist)
+    def helpers    = params.bids_qc_helpers ? file(params.bids_qc_helpers) : [] 
+
+    ch_bidsval_gate = ch_bidsval_log.map {meta, log ->
+        tuple(meta, log, gate_py, allowlist, helpers)
+    }
 
     // channels so it does not break when flags false
+    def ch_bidsqcgate          = Channel.empty()
     def ch_mriqc_part_publish  = Channel.empty()
     def ch_mriqc_group_publish = Channel.empty()
     def ch_fmriprep_publish    = Channel.empty()
     def ch_pydeface_publish    = Channel.empty()
 
+    if( params.bidsval_mcheck) {
+        log.warn "[BIDSVAL] Machine check"
+    }
+
+    BIDS_QC_GATE(ch_bidsval_gate)
+
+    ch_bidsqcgate = BIDS_QC_GATE.out.summary
+
+    def ok = false
+
+    ch_bidsqc_passed = BIDS_QC_GATE.out.passed.map { meta, passed_file ->
+        ok = passed_file.text.trim().toBoolean()
+        tuple(meta, ok)
+    }
 
 
-    // Print counts + log location to console -> stop so human can look at logs
 
-    if( params.stop_bidsval) {
+    if( params.stop_bidsval & ok) {
 
         log.warn "[BIDS] Stopping after BIDS validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
 
@@ -254,7 +277,6 @@ workflow NEUROMRIPREP {
                 }
             }
 
-            // BIDS filter selection: null | ses01 | ses02 | explicit json path
             def bf = params.fmriprep_bids_filter ? params.fmriprep_bids_filter.toString() : null
             def bf_path = null
             if( bf ) {
@@ -271,8 +293,7 @@ workflow NEUROMRIPREP {
             // FreeSurfer license
             def ch_fs_license = Channel.value( file(params.fmriprep_fs_license) )
 
-            // Compose inputs for module
-            // Common pattern: (meta, ds, fs_license, bids_filter)
+            // structure inputs for module
             ch_fmriprep_in = ch_fmriprep_meta
                 .combine(ch_fmriprep_ds)
                 .combine(ch_fs_license)
@@ -282,20 +303,15 @@ workflow NEUROMRIPREP {
             // Run fMRIPrep
             FMRIPREP(ch_fmriprep_in)
 
-            ch_fmriprep_publish = FMRIPREP.out.fmriprep_publish.flatten()
+            ch_fmriprep_pub = FMRIPREP.out.fmriprep_publish.flatten()
 
             
-            ch_fmriprep_publish = ch_fmriprep_publish.map { p ->
-                def rel = p.toString().replaceFirst(/^.*[\\\/]fmriprep_out_sub-[^\\\/]+[\\\/]+/, '')
+            ch_fmriprep_publish = ch_fmriprep_pub.map { p ->
+                def rel = p.toString().replaceFirst(/^.*[\\\/]fmriprep_out_[^\/]+\//, '')
                 return [ file: p, rel: rel ]
             }
 
-            ch_fmriprep_publish.view { bids_dir ->
-                log.info "[DEBUG] ch_fmriprep_item: ${bids_dir} (name=${bids_dir.name})"
-            }
-
             
-
 
             if( params.stop_fmriprep ) {
 
@@ -306,12 +322,12 @@ workflow NEUROMRIPREP {
                 // Dataset dir (single value)
                 def ch_pydeface_ds = ch_bids_dataset_after_ignore
 
-                // Per-subject/session meta (you already have it via ch_input)
+                // Per-subject/session meta 
                 def ch_pydeface_meta = ch_input
                     .map { meta, _ -> meta }
                     .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
 
-                // Optional restriction to VPN list file (one subject per line, allow "sub-XXX")
+                // vpn list
                 if( params.pydeface_vpn_file ) {
                     def vpn_set = file(params.pydeface_vpn_file)
                         .text
@@ -326,10 +342,7 @@ workflow NEUROMRIPREP {
                     }
                 }
 
-                /*
-                * Enumerate anat NIfTIs per (subject, session) from the BIDS dataset.
-                * Emits one task per nifti file -> parallel + resumable.
-                */
+
                 def ch_pydeface_in = ch_pydeface_meta
                     .combine(ch_pydeface_ds)
                     .flatMap { meta, ds ->
@@ -348,7 +361,24 @@ workflow NEUROMRIPREP {
                 // run pydeface
                 PYDEFACE(ch_pydeface_in)
 
-                ch_pydeface_publish = PYDEFACE.out.defaced.flatten()
+                //ch_pydeface_publish = PYDEFACE.out.defaced_publish.flatten()
+
+                ch_pydeface_publish = PYDEFACE.out.defaced_publish
+                    .flatten()
+                    .map { p ->
+                        def s = p.toString()
+                        def parts = s.split(/[\\\/]+/)
+                        def i = parts.findIndexOf { it.startsWith('sub-') } //find start where we want to publish
+                        if( i < 0 ) error "Could not derive rel path from: ${s}"
+                        def rel = parts[i..-1].join('/')  
+                        return [ file: p, rel: rel ]
+                }
+
+                /*
+                ch_pydeface_publish.view { bids_dir ->
+                    log.info "[DEBUG] ch_pydeface_item: ${bids_dir} (name=${bids_dir.name})"
+                }
+                */
 
             }
         }
@@ -357,6 +387,7 @@ workflow NEUROMRIPREP {
     
     emit:
     dcm2bids_merge      = ch_bids_dataset_items
+    bidsgate_report     = ch_bidsqcgate
     mriqc_part_publish  = ch_mriqc_part_publish
     mriqc_group_publish = ch_mriqc_group_publish
     fmriprep_publish    = ch_fmriprep_publish

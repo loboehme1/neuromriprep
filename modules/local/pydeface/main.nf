@@ -20,6 +20,7 @@ process PYDEFACE {
 
     output:
     tuple val(meta), path("sub-${meta.subject}/ses-${meta.session}/anat/*_defaced.nii.gz"), emit: defaced
+    path("sub-${meta.subject}/ses-${meta.session}/anat/*_defaced.nii.gz")                 , emit: defaced_publish
     path("logs/*.log"), emit: logs
 
     shell:

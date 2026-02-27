@@ -27,7 +27,7 @@ process FMRIPREP {
 
     output:
     tuple val(meta), path("fmriprep_out_sub-${meta.subject}"), emit: out
-    path("fmriprep_out/**"),                   emit: fmriprep_publish
+    path("fmriprep_out_sub-${meta.subject}/**"),               emit: fmriprep_publish
     path "versions_sub-${meta.subject}.yml", emit: versions
     path "logs/sub-${meta.subject}_out.log", emit: log_out
     path "logs/sub-${meta.subject}_err.log", emit: log_err
@@ -92,8 +92,6 @@ process FMRIPREP {
       --skull-strip-fixed-seed \\
       --output-spaces ${all_spaces} \\
       --work-dir "${wdir}" \\
-      --ignore fieldmaps \\
-      --fs-no-reconall \\
       2>&1 | tee -a logs/sub-${participant}_out.log
 
     grep -i -e "warning" -e "error" logs/sub-${participant}_out.log > logs/sub-${participant}_err.log || true
