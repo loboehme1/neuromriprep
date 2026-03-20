@@ -10,6 +10,7 @@ include { PYDEFACE           } from '../modules/local/pydeface'
 include { DEFACE_QC_RENDER   } from '../modules/local/defaceqcrender'
 include { DEFACE_METRICS     } from '../modules/local/defacemetrics'
 include { DEFACEQA_STEP3     } from '../modules/local/defaceqastep3'
+include { MERGE_DEFACEQA_STEP3} from '../modules/local/mergedefaceqastep3'
 
 /*
 include { MRI_DEFACE         } from '../modules/local/mri_deface'
@@ -232,19 +233,19 @@ workflow DEFACE_BENCHMARK {
 
     DEFACEQA_STEP3(ch_defaceqa_step3_in)
 
-    /*
-    ch_summary_in = DEFACE_METRICS.out.metrics
-        .mix(DEFACE_QC_RENDER.out.qc_summary)*/
+    ch_defaceqa_step3_tsvs = DEFACEQA_STEP3.out.features_publish.collect()
 
-    //MERGE_BENCHMARK(ch_summary_in)
+    MERGE_DEFACEQA_STEP3(ch_defaceqa_step3_tsvs)
 
-    benchmark_summary_out = Channel.empty()
+    ch_defaceqc_step3_merged = MERGE_DEFACEQA_STEP3.out.merged
+
+
 
     emit:
     //benchmark_defaced = ch_all_defaced
     benchmark_defaced = pydeface_defaced
     benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
     benchmark_metrics = DEFACE_METRICS.out.metrics_publish
-    benchmark_defaceqa= DEFACEQA_STEP3.out.features_publish
+    benchmark_defaceqa= ch_defaceqc_step3_merged
     versions          = DCM2BIDS.out.versions
 }
