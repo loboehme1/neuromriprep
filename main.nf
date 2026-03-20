@@ -104,7 +104,7 @@ workflow NFCORE_DEFACE_BENCHMARK {
     emit:
     benchmark_defaced = DEFACE_BENCHMARK.out.benchmark_defaced
     benchmark_qc      = DEFACE_BENCHMARK.out.benchmark_qc
-    benchmark_summary = DEFACE_BENCHMARK.out.benchmark_summary
+    benchmark_metrics = DEFACE_BENCHMARK.out.benchmark_metrics
     versions          = DEFACE_BENCHMARK.out.versions
 }
 
@@ -168,7 +168,7 @@ workflow {
     fmriprep_out          = Channel.empty()
     pydeface_out          = Channel.empty()
 
-    benchmark_summary_out = Channel.empty()
+    benchmark_metrics_out = Channel.empty()
     benchmark_qc_out      = Channel.empty()
     benchmark_files_out   = Channel.empty()
 
@@ -185,7 +185,7 @@ workflow {
     else if( params.mode == 'benchmark_defacing' ) {
         NFCORE_DEFACE_BENCHMARK()
 
-        benchmark_summary_out = NFCORE_DEFACE_BENCHMARK.out.benchmark_summary
+        benchmark_metrics_out = NFCORE_DEFACE_BENCHMARK.out.benchmark_metrics
         benchmark_qc_out      = NFCORE_DEFACE_BENCHMARK.out.benchmark_qc
         benchmark_files_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaced
     }
@@ -202,7 +202,7 @@ workflow {
     pydeface_out          = pydeface_out
 
 
-    benchmark_summary_out = benchmark_summary_out
+    benchmark_metrics_out = benchmark_metrics_out
     benchmark_qc_out      = benchmark_qc_out
     benchmark_files_out   = benchmark_files_out
 
@@ -253,8 +253,8 @@ output {
         }
     }
 
-    benchmark_summary_out {
-        path { f -> f >> "benchmark_defacing/summary/${f.name}" }
+    benchmark_metrics_out {
+        path { f -> f >> "benchmark_defacing/metrics/${f.name}" }
     }
 
     benchmark_qc_out {
