@@ -25,6 +25,13 @@ include { MRIQC_PARTICIPANTS} from '../subworkflows/local/mriqc_participants'
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+
+// helper function to normalize sub ids
+def normalizeSubId(subject) {
+    def s = subject.toString().trim()
+    return s.startsWith('sub-') ? s : "sub-${s}"
+}
+
 workflow NEUROMRIPREP {
 
 
@@ -218,6 +225,41 @@ workflow NEUROMRIPREP {
             .map { meta, _ -> meta }                       // meta contains subject/session
             .combine(ch_bids_dataset_after_ignore)
             .map { meta, ds -> tuple(meta, ds) }
+
+        /*
+        // Check existing MRIQC subject folders in the chosen output directory
+        ch_existing_mriqc_subjects = Channel
+            .fromPath("${params.outdir}/derivatives/mriqc/sub-*", type: 'dir', checkIfExists: false)
+            .map { dir -> dir.getName() }                  // e.g. sub-001001
+            .collect()
+            .map { it.toSet() }
+
+        // Filter out subjects that already exist in derivatives/mriqc
+        ch_mriqc_in_filtered = ch_mriqc_in
+            .combine(ch_existing_mriqc_subjects)
+            .filter { meta, ds, done_subjects ->
+                !done_subjects.contains(normalizeSubId(meta.subject))
+            }
+            .map { meta, ds, done_subjects ->
+                tuple(meta, ds)
+            }
+
+        // Optional: log which subjects are skipped
+        ch_mriqc_skipped = ch_mriqc_in
+            .combine(ch_existing_mriqc_subjects)
+            .filter { meta, ds, done_subjects ->
+                done_subjects.contains(normalizeSubId(meta.subject))
+            }
+            .map { meta, ds, done_subjects ->
+                normalizeSubId(meta.subject)
+            }
+
+        ch_mriqc_skipped.view { s ->
+            "[MRIQC] Skipping already processed subject found in ${params.outdir}/derivatives/mriqc: ${s}"
+        }
+
+        MRIQC_PARTICIPANTS(ch_mriqc_in_filtered, params.mriqc_vpn_file)
+        */
 
 
         MRIQC_PARTICIPANTS(ch_mriqc_in, params.mriqc_vpn_file)

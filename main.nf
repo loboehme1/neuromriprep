@@ -16,6 +16,7 @@
 */
 
 include { NEUROMRIPREP            } from './workflows/neuromriprep'
+include { DEFACE_BENCHMARK        } from './workflows/deface_benchmark'
 //include { PIPELINE_INITIALISATION } from './subworkflows/local/utils_nfcore_neuromriprep_pipeline'
 //include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_neuromriprep_pipeline'
 //include { samplesheetToList       } from 'plugin/nf-schema'
@@ -75,15 +76,49 @@ workflow NFCORE_NEUROMRIPREP {
     versions            = NEUROMRIPREP.out.versions
     multiqc_report      = Channel.empty() //PLACEHOLDER
 }
+
+
+
+workflow NFCORE_DEFACE_BENCHMARK {
+
+    main:
+
+    ch_samplesheet = Channel
+        .fromPath(params.input)
+        .splitCsv(header: true)
+        .map { row ->
+            def meta = [
+                id     : row.project,
+                project: row.project
+            ]
+            [ meta, file(row.dicom_dir) ]
+        }
+
+    ch_config = Channel.fromPath(params.dcm2bids_config, checkIfExists: true)
+
+    DEFACE_BENCHMARK(
+        ch_samplesheet,
+        ch_config
+    )
+
+    emit:
+    benchmark_defaced = DEFACE_BENCHMARK.out.benchmark_defaced
+    benchmark_qc      = DEFACE_BENCHMARK.out.benchmark_qc
+    benchmark_summary = DEFACE_BENCHMARK.out.benchmark_summary
+    versions          = DEFACE_BENCHMARK.out.versions
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-workflow {
+params.mode = params.mode ?: 'production'
 
-    main:
+//workflow {
+
+    //main:
     //
     // SUBWORKFLOW: Run initialisation tasks
     //
@@ -104,7 +139,7 @@ workflow {
     //
     // WORKFLOW: Run main workflow
     //
-    NFCORE_NEUROMRIPREP ()
+    //NFCORE_NEUROMRIPREP ()
 
     //
     // SUBWORKFLOW: Run completion tasks
@@ -121,15 +156,56 @@ workflow {
     )
     */
 
-    
+workflow {
+
+    main:
+
+    // initialize everything as empty
+    merge_out             = Channel.empty()
+    bidsqc_out            = Channel.empty()
+    mriqc_part_out        = Channel.empty()
+    mriqc_group_out       = Channel.empty()
+    fmriprep_out          = Channel.empty()
+    pydeface_out          = Channel.empty()
+
+    benchmark_summary_out = Channel.empty()
+    benchmark_qc_out      = Channel.empty()
+    benchmark_files_out   = Channel.empty()
+
+    if( params.mode == 'production' ) {
+        NFCORE_NEUROMRIPREP()
+
+        merge_out      = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
+        bidsqc_out     = NFCORE_NEUROMRIPREP.out.bidsgate_report
+        mriqc_part_out = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
+        mriqc_group_out= NFCORE_NEUROMRIPREP.out.mriqc_group_publish
+        fmriprep_out   = NFCORE_NEUROMRIPREP.out.fmriprep_publish
+        pydeface_out   = NFCORE_NEUROMRIPREP.out.pydeface_publish
+    }
+    else if( params.mode == 'benchmark_defacing' ) {
+        NFCORE_DEFACE_BENCHMARK()
+
+        benchmark_summary_out = NFCORE_DEFACE_BENCHMARK.out.benchmark_summary
+        benchmark_qc_out      = NFCORE_DEFACE_BENCHMARK.out.benchmark_qc
+        benchmark_files_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaced
+    }
+    else {
+        error "Unknown --mode '${params.mode}'. Use 'production' or 'benchmark_defacing'."
+    }
 
     publish:
-    merge_out          = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
-    bidsqc_out         = NFCORE_NEUROMRIPREP.out.bidsgate_report
-    mriqc_part_out     = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
-    mriqc_group_out    = NFCORE_NEUROMRIPREP.out.mriqc_group_publish
-    fmriprep_out       = NFCORE_NEUROMRIPREP.out.fmriprep_publish
-    pydeface_out       = NFCORE_NEUROMRIPREP.out.pydeface_publish
+    merge_out             = merge_out
+    bidsqc_out            = bidsqc_out
+    mriqc_part_out        = mriqc_part_out
+    mriqc_group_out       = mriqc_group_out
+    fmriprep_out          = fmriprep_out
+    pydeface_out          = pydeface_out
+
+
+    benchmark_summary_out = benchmark_summary_out
+    benchmark_qc_out      = benchmark_qc_out
+    benchmark_files_out   = benchmark_files_out
+
 }
 
 
@@ -174,6 +250,22 @@ output {
     pydeface_out {
         path { x ->
             x.file >> "derivatives/pydefaces/${x.rel}"   
+        }
+    }
+
+    benchmark_summary_out {
+        path { f -> f >> "benchmark_defacing/summary/${f.name}" }
+    }
+
+    benchmark_qc_out {
+        path { x ->
+            x.file >> "benchmark_defacing/qc/${x.rel}"
+        }
+    }
+
+    benchmark_files_out {
+        path { x ->
+            x.file >> "benchmark_defacing/defaced/${x.rel}"
         }
     }
 }

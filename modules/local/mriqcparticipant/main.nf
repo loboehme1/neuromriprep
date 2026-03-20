@@ -5,11 +5,6 @@ process MRIQC_PARTICIPANT {
 
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
 
-    /*
-    publishDir {
-        params.mriqc_part_outdir ?: "${params.outdir}/derivatives/mriqc"
-    }, mode: 'copy', overwrite: true
-    */
 
     input:
     tuple val(meta), path(bids_dataset, stageAs: 'input_bids')
