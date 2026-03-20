@@ -11,6 +11,7 @@ include { DEFACE_QC_RENDER   } from '../modules/local/defaceqcrender'
 include { DEFACE_METRICS     } from '../modules/local/defacemetrics'
 include { DEFACEQA_STEP3     } from '../modules/local/defaceqastep3'
 include { MERGE_DEFACEQA_STEP3} from '../modules/local/mergedefaceqastep3'
+include { SUMMARIZE_DEFACEQA_STEP3 } from '../modules/local/summarizedefaceqastep3'
 
 /*
 include { MRI_DEFACE         } from '../modules/local/mri_deface'
@@ -239,6 +240,7 @@ workflow DEFACE_BENCHMARK {
 
     ch_defaceqc_step3_merged = MERGE_DEFACEQA_STEP3.out.merged
 
+    SUMMARIZE_DEFACEQA_STEP3(ch_defaceqc_step3_merged)
 
 
     emit:
@@ -247,5 +249,6 @@ workflow DEFACE_BENCHMARK {
     benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
     benchmark_metrics = DEFACE_METRICS.out.metrics_publish
     benchmark_defaceqa= ch_defaceqc_step3_merged
+    benchmark_defaceqa_sum = SUMMARIZE_DEFACEQA_STEP3.out.summary_tsv
     versions          = DCM2BIDS.out.versions
 }

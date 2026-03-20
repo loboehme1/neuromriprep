@@ -106,6 +106,7 @@ workflow NFCORE_DEFACE_BENCHMARK {
     benchmark_qc      = DEFACE_BENCHMARK.out.benchmark_qc
     benchmark_metrics = DEFACE_BENCHMARK.out.benchmark_metrics
     benchmark_defaceqa= DEFACE_BENCHMARK.out.benchmark_defaceqa
+    benchmark_defaceqa_sum = DEFACE_BENCHMARK.out.benchmark_defaceqa_sum
     versions          = DEFACE_BENCHMARK.out.versions
 }
 
@@ -173,6 +174,7 @@ workflow {
     benchmark_qc_out      = Channel.empty()
     benchmark_files_out   = Channel.empty()
     benchmark_defaceqa    = Channel.empty()
+    benchmark_defaceqa_sum= Channel.empty()
 
     if( params.mode == 'production' ) {
         NFCORE_NEUROMRIPREP()
@@ -191,6 +193,7 @@ workflow {
         benchmark_qc_out      = NFCORE_DEFACE_BENCHMARK.out.benchmark_qc
         benchmark_files_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaced
         benchmark_defaceqa    = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaceqa
+        benchmark_defaceqa_sum= NFCORE_DEFACE_BENCHMARK.out.benchmark_defaceqa_sum
     }
     else {
         error "Unknown --mode '${params.mode}'. Use 'production' or 'benchmark_defacing'."
@@ -209,6 +212,7 @@ workflow {
     benchmark_qc_out      = benchmark_qc_out
     benchmark_files_out   = benchmark_files_out
     benchmark_defaceqa_out= benchmark_defaceqa
+    benchmark_defaceqa_sum_out=benchmark_defaceqa_sum
 
 }
 
@@ -280,6 +284,10 @@ output {
 
     benchmark_defaceqa_out {
         path 'benchmark_defacing/defaceqa'
+    }
+
+    benchmark_defaceqa_sum_out {
+        path 'benchmark_defacing/defaceqa/'
     }
 }
 
