@@ -6,8 +6,10 @@ include { BIDSIGNORE         } from '../modules/local/bidsignore'
 include { BIDS_VALIDATOR     } from '../modules/local/bidsvalidator'
 
 include { PYDEFACE           } from '../modules/local/pydeface'
+
 include { DEFACE_QC_RENDER   } from '../modules/local/defaceqcrender'
 include { DEFACE_METRICS     } from '../modules/local/defacemetrics'
+include { NONDEFACED_DETECTOR} from '../modules/local/nondefaceddetector'
 
 /*
 include { MRI_DEFACE         } from '../modules/local/mri_deface'
@@ -182,18 +184,9 @@ workflow DEFACE_BENCHMARK {
 
     */
 
-    ch_detector_in = PYDEFACE.out.defaced
-        .map { meta, defaced_nifti ->
-            tuple(meta, 'pydeface', defaced_nifti)
-        }
+    NONDEFACED_DETECTOR(ch_nondefaced_detector_in)
 
-    ch_nondefaced_detector_in = ch_detector_in
-        .combine(Channel.value(file(params.nondefaced_detector_model_path)))
-        .map { meta, method, defaced_nifti, model_dir ->
-            tuple(meta, method, defaced_nifti, model_dir)
-        }
 
-    
 
     /*
     ch_summary_in = DEFACE_METRICS.out.metrics
@@ -208,5 +201,6 @@ workflow DEFACE_BENCHMARK {
     benchmark_defaced = pydeface_defaced
     benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
     benchmark_metrics = DEFACE_METRICS.out.metrics_publish
+    benchmark_nondefaced_detector  = NONDEFACED_DETECTOR.out.tsv_publish
     versions          = DCM2BIDS.out.versions
 }
