@@ -258,15 +258,20 @@ output {
     }
 
     benchmark_qc_out {
-        path { x ->
-            x.file >> "benchmark_defacing/qc/${x.rel}"
+        path { f ->
+            f >> "benchmark_defacing/qc/${f.name}"
         }
     }
 
+    /*
     benchmark_files_out {
         path { x ->
             x.file >> "benchmark_defacing/defaced/${x.rel}"
         }
+    }
+    */
+    benchmark_files_out {
+        path 'benchmark_defacing/defaced'
     }
 }
 

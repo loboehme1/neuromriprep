@@ -6,6 +6,7 @@ include { BIDSIGNORE         } from '../modules/local/bidsignore'
 include { BIDS_VALIDATOR     } from '../modules/local/bidsvalidator'
 
 include { PYDEFACE           } from '../modules/local/pydeface'
+include { DEFACE_QC_RENDER   } from '../modules/local/defaceqcrender'
 
 /*
 include { MRI_DEFACE         } from '../modules/local/mri_deface'
@@ -14,7 +15,7 @@ include { AFNI_REFACER       } from '../modules/local/afni_refacer'
 include { QUICKSHEAR         } from '../modules/local/quickshear'
 include { DEEPDEFACER        } from '../modules/local/deepdefacer'
 
-include { DEFACE_QC_RENDER   } from '../modules/local/deface_qc_render'
+
 include { DEFACE_METRICS     } from '../modules/local/deface_metrics'
 include { MERGE_BENCHMARK    } from '../modules/local/merge_benchmark'
 */
@@ -104,23 +105,61 @@ workflow DEFACE_BENCHMARK {
 
 
     // collect original anat nifti inputs
-    ch_benchmark_in = ch_input
-        .map { meta, _ -> meta }
-        .combine(ch_bids_dataset_after_ignore)
-        .flatMap { meta, ds ->
-            def anatDir = new File(ds.toString(), "sub-${meta.subject}/ses-${meta.session}/anat")
-            if( !anatDir.exists() ) return []
+ch_benchmark_in = ch_input
+    .map { meta, _ -> meta }
+    .combine(ch_bids_dataset_after_ignore)
+    .flatMap { meta, ds ->
+        def anatDir = new File(ds.toString(), "sub-${meta.subject}/ses-${meta.session}/anat")
+        if( !anatDir.exists() ) return []
 
-            def niiFiles = anatDir
-                .listFiles()
-                ?.findAll { it.name.endsWith('.nii.gz') && !it.name.contains('_defaced') }
-                ?: []
+        def niiFiles = anatDir
+            .listFiles()
+            ?.findAll { it.name.endsWith('.nii.gz') && !it.name.contains('_defaced') }
+            ?: []
 
-            niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
+        niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
+    }
+
+// run pydeface
+PYDEFACE(ch_benchmark_in)
+
+// helper script path
+qc_script = file("${projectDir}/assets/scripts/deface_qc_render.py")
+
+def stripNii = { f ->
+    def n = f.getName()
+    n = n.replaceFirst(/\.nii\.gz$/, '')
+    n = n.replaceFirst(/\.nii$/, '')
+    return n
+}
+
+ch_orig_keyed = ch_benchmark_in
+    .map { meta, ds, orig_nifti ->
+        def key = "${meta.subject}|${meta.session}|${stripNii(orig_nifti)}"
+        tuple(key, meta, orig_nifti)
+    }
+
+    ch_pydeface_keyed = PYDEFACE.out.defaced
+        .map { meta, defaced_nifti ->
+            def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
+            def key  = "${meta.subject}|${meta.session}|${base}"
+            tuple(key, meta, defaced_nifti)
         }
 
-    // fan out
-    PYDEFACE(ch_benchmark_in)
+    ch_deface_qc_in = ch_orig_keyed
+        .join(ch_pydeface_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, defaced_nifti ->
+            tuple(meta_orig, 'pydeface', qc_script, orig_nifti, defaced_nifti)
+        }
+
+    DEFACE_QC_RENDER(ch_deface_qc_in)
+
+    pydeface_defaced = PYDEFACE.out.defaced_publish
+
+    emit:
+    benchmark_defaced = pydeface_defaced
+    benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
+    versions          = DCM2BIDS.out.versions
 
     /*
     MRI_DEFACE(ch_benchmark_in)
@@ -140,17 +179,22 @@ workflow DEFACE_BENCHMARK {
 
     */
 
-    DEFACE_QC_RENDER(ch_all_defaced)
-    DEFACE_METRICS(ch_all_defaced)
 
+    //deface_qc_publish = DEFACE_QC_RENDER.out.qc_publish
+    //DEFACE_METRICS(ch_all_defaced)
+
+    /*
     ch_summary_in = DEFACE_METRICS.out.metrics
-        .mix(DEFACE_QC_RENDER.out.qc_summary)
+        .mix(DEFACE_QC_RENDER.out.qc_summary)*/
 
-    MERGE_BENCHMARK(ch_summary_in)
+    //MERGE_BENCHMARK(ch_summary_in)
+
+    benchmark_summary_out = Channel.empty()
 
     emit:
-    benchmark_defaced = ch_all_defaced
+    //benchmark_defaced = ch_all_defaced
+    benchmark_defaced = pydeface_defaced
     benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
-    benchmark_summary = MERGE_BENCHMARK.out.summary
+    benchmark_summary = benchmark_summary_out //placeholder for now
     versions          = DCM2BIDS.out.versions
 }
