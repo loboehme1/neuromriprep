@@ -57,6 +57,7 @@ process PYDEFACE {
     # Skip if input already looks defaced --> does this work?
     if [[ "$base" == *"_defaced" ]]; then
       echo "[SKIP] Input already looks defaced: $base" | tee -a "$out_log"
+      cp "!{nifti}" "$out_file"
       : >> "$err_log"
       exit 0
     fi
