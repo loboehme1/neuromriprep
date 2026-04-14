@@ -72,7 +72,7 @@ workflow NFCORE_NEUROMRIPREP {
     mriqc_part_publish  = NEUROMRIPREP.out.mriqc_part_publish
     mriqc_group_publish = NEUROMRIPREP.out.mriqc_group_publish
     fmriprep_publish    = NEUROMRIPREP.out.fmriprep_publish
-    pydeface_publish    = NEUROMRIPREP.out.pydeface_publish
+    deface_publish      = NEUROMRIPREP.out.deface_publish
     versions            = NEUROMRIPREP.out.versions
     multiqc_report      = Channel.empty() //PLACEHOLDER
 }
@@ -105,8 +105,7 @@ workflow NFCORE_DEFACE_BENCHMARK {
     benchmark_defaced = DEFACE_BENCHMARK.out.benchmark_defaced
     benchmark_qc      = DEFACE_BENCHMARK.out.benchmark_qc
     benchmark_metrics = DEFACE_BENCHMARK.out.benchmark_metrics
-    benchmark_defaceqa= DEFACE_BENCHMARK.out.benchmark_defaceqa
-    benchmark_defaceqa_sum = DEFACE_BENCHMARK.out.benchmark_defaceqa_sum
+    benchmark_defacedet= DEFACE_BENCHMARK.out.benchmark_defacedet
     versions          = DEFACE_BENCHMARK.out.versions
 }
 
@@ -168,13 +167,13 @@ workflow {
     mriqc_part_out        = Channel.empty()
     mriqc_group_out       = Channel.empty()
     fmriprep_out          = Channel.empty()
-    pydeface_out          = Channel.empty()
+    deface_out          = Channel.empty()
 
-    benchmark_metrics_out = Channel.empty()
-    benchmark_qc_out      = Channel.empty()
-    benchmark_files_out   = Channel.empty()
-    benchmark_defaceqa    = Channel.empty()
-    benchmark_defaceqa_sum= Channel.empty()
+    benchmark_metrics_out   = Channel.empty()
+    benchmark_qc_out        = Channel.empty()
+    benchmark_files_out     = Channel.empty()
+    benchmark_defacedet_out = Channel.empty()
+
 
     if( params.mode == 'production' ) {
         NFCORE_NEUROMRIPREP()
@@ -184,7 +183,7 @@ workflow {
         mriqc_part_out = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
         mriqc_group_out= NFCORE_NEUROMRIPREP.out.mriqc_group_publish
         fmriprep_out   = NFCORE_NEUROMRIPREP.out.fmriprep_publish
-        pydeface_out   = NFCORE_NEUROMRIPREP.out.pydeface_publish
+        deface_out   = NFCORE_NEUROMRIPREP.out.deface_publish
     }
     else if( params.mode == 'benchmark_defacing' ) {
         NFCORE_DEFACE_BENCHMARK()
@@ -192,8 +191,7 @@ workflow {
         benchmark_metrics_out = NFCORE_DEFACE_BENCHMARK.out.benchmark_metrics
         benchmark_qc_out      = NFCORE_DEFACE_BENCHMARK.out.benchmark_qc
         benchmark_files_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaced
-        benchmark_defaceqa    = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaceqa
-        benchmark_defaceqa_sum= NFCORE_DEFACE_BENCHMARK.out.benchmark_defaceqa_sum
+        benchmark_defacedet_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defacedet
     }
     else {
         error "Unknown --mode '${params.mode}'. Use 'production' or 'benchmark_defacing'."
@@ -205,14 +203,13 @@ workflow {
     mriqc_part_out        = mriqc_part_out
     mriqc_group_out       = mriqc_group_out
     fmriprep_out          = fmriprep_out
-    pydeface_out          = pydeface_out
+    deface_out            = deface_out
 
 
     benchmark_metrics_out = benchmark_metrics_out
     benchmark_qc_out      = benchmark_qc_out
     benchmark_files_out   = benchmark_files_out
-    benchmark_defaceqa_out= benchmark_defaceqa
-    benchmark_defaceqa_sum_out=benchmark_defaceqa_sum
+    benchmark_defacedet_out=benchmark_defacedet_out
 
 }
 
@@ -254,10 +251,10 @@ output {
         }
     }
 
-    // PYDEFACE output -->
-    pydeface_out {
+    // DEFACE output -->
+    deface_out {
         path { x ->
-            x.file >> "derivatives/pydefaces/${x.rel}"   
+            x.file >> "derivatives/defaces/${x.rel}"   
         }
     }
 
@@ -271,23 +268,15 @@ output {
         }
     }
 
-    /*
-    benchmark_files_out {
-        path { x ->
-            x.file >> "benchmark_defacing/defaced/${x.rel}"
-        }
-    }
-    */
     benchmark_files_out {
         path 'benchmark_defacing/defaced'
     }
 
-    benchmark_defaceqa_out {
-        path 'benchmark_defacing/defaceqa'
-    }
-
-    benchmark_defaceqa_sum_out {
-        path 'benchmark_defacing/defaceqa/'
+    benchmark_defacedet_out {
+        path { meta, qc_json, qc_pass ->
+            qc_json >> "benchmark_defacedet/defacedet/${qc_json.name}"
+            qc_pass >> "benchmark_defacedet/defacedet/${qc_pass.name}"
+        }
     }
 }
 

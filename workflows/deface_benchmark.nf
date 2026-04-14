@@ -12,6 +12,7 @@ include { DEFACE_METRICS     } from '../modules/local/defacemetrics'
 include { DEFACEQA_STEP3     } from '../modules/local/defaceqastep3'
 include { MERGE_DEFACEQA_STEP3} from '../modules/local/mergedefaceqastep3'
 include { SUMMARIZE_DEFACEQA_STEP3 } from '../modules/local/summarizedefaceqastep3'
+include { DEFACE_DETECTOR } from '../modules/local/defacedetecor'
 
 /*
 include { MRI_DEFACE         } from '../modules/local/mri_deface'
@@ -186,61 +187,17 @@ workflow DEFACE_BENCHMARK {
 
     */
 
-    //brainmask channel
-    def ch_fmriprep_brainmasks = Channel
-        .fromPath("${params.fmriprep_brainmask_dir}/sub-*/ses-*/anat/sub-??????_ses-??_desc-brain_mask.nii.gz", checkIfExists: true)
-        .map { mask ->
-            def m = mask.name =~ /^sub-([^_]+)_ses-([^_]+)_desc-brain_mask\.nii\.gz$/
-            if( !m.matches() ) {
-                error "Unexpected fMRIPrep brainmask filename: ${mask.name}"
-            }
+    
 
-            def subject = m[0][1]
-            def session = m[0][2]
-            def key = "${subject}|${session}"
+    pydefaced_t1w = PYDEFACE.out.defaced
+        .filter { meta, f -> f.name ==~ /.*_T1w_defaced\.nii(\.gz)?$/ }
 
-            tuple(key, [subject: subject, session: session], mask)
-        }
+    DEFACE_DETECTOR(pydefaced_t1w)
+    defacedet_out = DEFACE_DETECTOR.out.qc_json.join(DEFACE_DETECTOR.out.qc_pass)
 
-    ch_orig_t1w_keyed = ch_benchmark_in
-        .filter { meta, ds, orig_nifti ->
-            orig_nifti.name.contains('_T1w')
-        }
-        .map { meta, ds, orig_nifti ->
-            def key = "${meta.subject}|${meta.session}"
-            tuple(key, meta, orig_nifti)
-        }
-
-    ch_pydeface_t1w_keyed = PYDEFACE.out.defaced
-        .filter { meta, defaced_nifti ->
-            defaced_nifti.name.contains('_T1w')
-        }
-        .map { meta, defaced_nifti ->
-            def key = "${meta.subject}|${meta.session}"
-            tuple(key, meta, defaced_nifti)
-        }
-
-    def step3_script = file("${projectDir}/assets/scripts/defaceqa_step3_generic.py")
-
-    ch_defaceqa_step3_in = ch_orig_t1w_keyed
-        .join(ch_fmriprep_brainmasks)
-        .join(ch_pydeface_t1w_keyed)
-        .map { key, meta_orig, orig_nifti, meta_mask, brainmask_nifti, meta_def, defaced_nifti ->
-            tuple(meta_orig, 'pydeface', step3_script, orig_nifti, brainmask_nifti, defaced_nifti)
-        }
-
-
-
-
-    DEFACEQA_STEP3(ch_defaceqa_step3_in)
-
-    ch_defaceqa_step3_tsvs = DEFACEQA_STEP3.out.features_publish.collect()
-
-    MERGE_DEFACEQA_STEP3(ch_defaceqa_step3_tsvs)
-
-    ch_defaceqc_step3_merged = MERGE_DEFACEQA_STEP3.out.merged
-
-    SUMMARIZE_DEFACEQA_STEP3(ch_defaceqc_step3_merged)
+    PYDEFACE.out.defaced.view { meta, f -> "[PYDEFACE DEFACED] ${f.name}" }
+    
+    pydefaced_t1w.view { meta, f -> "[T1W FOR DETECTOR] ${f.name}" }
 
 
     emit:
@@ -248,7 +205,6 @@ workflow DEFACE_BENCHMARK {
     benchmark_defaced = pydeface_defaced
     benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
     benchmark_metrics = DEFACE_METRICS.out.metrics_publish
-    benchmark_defaceqa= ch_defaceqc_step3_merged
-    benchmark_defaceqa_sum = SUMMARIZE_DEFACEQA_STEP3.out.summary_tsv
+    benchmark_defacedet = defacedet_out
     versions          = DCM2BIDS.out.versions
 }
