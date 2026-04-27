@@ -1,30 +1,19 @@
-include { DCM2BIDS           } from '../modules/local/dcm2bids'
-include { DCM2BIDS_CONFIG    } from '../modules/local/dcm2bidsconfig'
-include { DCM2BIDS_POSTPROC  } from '../modules/local/dcm2bidspostprocess'
-include { MERGE_BIDS_DATASET } from '../modules/local/mergebidsdataset'
-include { BIDSIGNORE         } from '../modules/local/bidsignore'
-include { BIDS_VALIDATOR     } from '../modules/local/bidsvalidator'
+include { DCM2BIDS            } from '../modules/local/dcm2bids'
+include { DCM2BIDS_CONFIG     } from '../modules/local/dcm2bidsconfig'
+include { DCM2BIDS_POSTPROC   } from '../modules/local/dcm2bidspostprocess'
+include { MERGE_BIDS_DATASET  } from '../modules/local/mergebidsdataset'
+include { BIDSIGNORE          } from '../modules/local/bidsignore'
+include { BIDS_VALIDATOR      } from '../modules/local/bidsvalidator'
 
-include { PYDEFACE           } from '../modules/local/pydeface'
+include { PYDEFACE            } from '../modules/local/pydeface'
+include { MRI_DEFACE          } from '../modules/local/mrideface'
+include { FSL_DEFACE          } from '../modules/local/fsldeface'
+include { AFNI_REFACER        } from '../modules/local/afnirefacer'
 
-include { DEFACE_QC_RENDER   } from '../modules/local/defaceqcrender'
-include { DEFACE_METRICS     } from '../modules/local/defacemetrics'
-include { DEFACEQA_STEP3     } from '../modules/local/defaceqastep3'
-include { MERGE_DEFACEQA_STEP3} from '../modules/local/mergedefaceqastep3'
-include { SUMMARIZE_DEFACEQA_STEP3 } from '../modules/local/summarizedefaceqastep3'
-include { DEFACE_DETECTOR } from '../modules/local/defacedetecor'
-
-/*
-include { MRI_DEFACE         } from '../modules/local/mri_deface'
-include { FSL_DEFACE         } from '../modules/local/fsl_deface'
-include { AFNI_REFACER       } from '../modules/local/afni_refacer'
-include { QUICKSHEAR         } from '../modules/local/quickshear'
-include { DEEPDEFACER        } from '../modules/local/deepdefacer'
-
-include { MERGE_BENCHMARK    } from '../modules/local/merge_benchmark'
-*/
-
-
+include { DEFACE_QC_RENDER    } from '../modules/local/defaceqcrender'
+include { DEFACE_METRICS      } from '../modules/local/defacemetrics'
+include { DEFACE_DETECTOR     } from '../modules/local/defacedetector'
+include { MERGE_BENCHMARK     } from '../modules/local/mergebenchmark'
 
 workflow DEFACE_BENCHMARK {
 
@@ -34,7 +23,6 @@ workflow DEFACE_BENCHMARK {
 
     main:
 
-    // exactly like in other workflow
     ch_input = ch_samplesheet
         .map { meta, dicom_dir ->
             def folder_name = dicom_dir.name
@@ -104,11 +92,37 @@ workflow DEFACE_BENCHMARK {
         .map { meta, outdir -> outdir }
         .first()
 
+    def stripNii = { f ->
+        def n = f.getName()
+        n = n.replaceFirst(/\.nii\.gz$/, '')
+        n = n.replaceFirst(/\.nii$/, '')
+        return n
+    }
 
-    //after bidsvalidation, do defacing benchmarking
+    def normalizeDetectorImageName = { p ->
+        def n = p.getName()
+        n = n.replaceFirst(/\.deface_qc\.json$/, '')
+        n = n.replaceFirst(/\.json$/, '')
+        n = n.replaceFirst(/_defaced$/, '')
+        return n
+    }
 
+    def relFromSub = { p ->
+        def s = p.toString()
+        def parts = s.split(/[\\\/]+/)
+        def i = parts.findIndexOf { it.startsWith('sub-') }
+        if( i < 0 ) error "Could not derive rel path from: ${s}"
+        return parts[i..-1].join('/')
+    }
 
-    // collect original anat nifti inputs
+    qc_script      = file("${projectDir}/assets/scripts/deface_qc_render.py")
+    metrics_script = file("${projectDir}/assets/scripts/deface_metrics.py")
+    merge_script   = Channel.value(file("${projectDir}/assets/scripts/merge_benchmark.py"))
+
+    detector_script   = Channel.value(file("${projectDir}/assets/scripts/mri_deface_detector.mjs"))
+    detector_modeldir = Channel.value(file("${projectDir}/assets/mri-deface-detector/model_js"))
+
+    // original T1w inputs only
     ch_benchmark_in = ch_input
         .map { meta, _ -> meta }
         .combine(ch_bids_dataset_after_ignore)
@@ -118,93 +132,200 @@ workflow DEFACE_BENCHMARK {
 
             def niiFiles = anatDir
                 .listFiles()
-                ?.findAll { it.name.endsWith('.nii.gz') && !it.name.contains('_defaced') }
+                ?.findAll { f ->
+                    def n = f.name
+                    n.endsWith('.nii.gz') &&
+                    !n.contains('_defaced') &&
+                    (n ==~ /.*_T1w\.nii(\.gz)?$/)
+                }
                 ?: []
 
             niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
         }
 
-    // run pydeface
+    // run all 4 defacers
     PYDEFACE(ch_benchmark_in)
+    MRI_DEFACE(ch_benchmark_in)
+    FSL_DEFACE(ch_benchmark_in)
+    AFNI_REFACER(ch_benchmark_in)
 
-    // helper scripts paths
-    qc_script = file("${projectDir}/assets/scripts/deface_qc_render.py")
-    metrics_script = file("${projectDir}/assets/scripts/deface_metrics.py")
-
-    def stripNii = { f ->
-        def n = f.getName()
-        n = n.replaceFirst(/\.nii\.gz$/, '')
-        n = n.replaceFirst(/\.nii$/, '')
-        return n
-    }
-
+    // originals keyed
     ch_orig_keyed = ch_benchmark_in
         .map { meta, ds, orig_nifti ->
             def key = "${meta.subject}|${meta.session}|${stripNii(orig_nifti)}"
             tuple(key, meta, orig_nifti)
         }
 
+    // defaced outputs keyed
     ch_pydeface_keyed = PYDEFACE.out.defaced
         .map { meta, defaced_nifti ->
             def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
             def key  = "${meta.subject}|${meta.session}|${base}"
-            tuple(key, meta, defaced_nifti)
+            tuple(key, meta + [ deface_method: 'pydeface' ], 'pydeface', defaced_nifti)
         }
 
-    ch_deface_qc_in = ch_orig_keyed
-        .join(ch_pydeface_keyed)
-        .map { key, meta_orig, orig_nifti, meta_def, defaced_nifti ->
-            tuple(meta_orig, 'pydeface', qc_script, orig_nifti, defaced_nifti)
+    ch_mri_deface_keyed = MRI_DEFACE.out.defaced
+        .map { meta, defaced_nifti ->
+            def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
+            def key  = "${meta.subject}|${meta.session}|${base}"
+            tuple(key, meta + [ deface_method: 'mri_deface' ], 'mri_deface', defaced_nifti)
         }
+
+    ch_fsl_deface_keyed = FSL_DEFACE.out.defaced
+        .map { meta, defaced_nifti ->
+            def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
+            def key  = "${meta.subject}|${meta.session}|${base}"
+            tuple(key, meta + [ deface_method: 'fsl_deface' ], 'fsl_deface', defaced_nifti)
+        }
+
+    ch_afni_refacer_keyed = AFNI_REFACER.out.defaced
+        .map { meta, defaced_nifti ->
+            def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
+            def key  = "${meta.subject}|${meta.session}|${base}"
+            tuple(key, meta + [ deface_method: 'afni_refacer' ], 'afni_refacer', defaced_nifti)
+        }
+
+    // QC inputs per method, then mix
+    ch_deface_qc_py = ch_orig_keyed
+        .join(ch_pydeface_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, qc_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_qc_mri = ch_orig_keyed
+        .join(ch_mri_deface_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, qc_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_qc_fsl = ch_orig_keyed
+        .join(ch_fsl_deface_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, qc_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_qc_afni = ch_orig_keyed
+        .join(ch_afni_refacer_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, qc_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_qc_in = Channel
+        .empty()
+        .mix(ch_deface_qc_py)
+        .mix(ch_deface_qc_mri)
+        .mix(ch_deface_qc_fsl)
+        .mix(ch_deface_qc_afni)
 
     DEFACE_QC_RENDER(ch_deface_qc_in)
 
-    pydeface_defaced = PYDEFACE.out.defaced_publish
-
-    ch_deface_metrics_in = ch_orig_keyed
+    // metrics inputs per method, then mix
+    ch_deface_metrics_py = ch_orig_keyed
         .join(ch_pydeface_keyed)
-        .map { key, meta_orig, orig_nifti, meta_def, defaced_nifti ->
-            tuple(meta_orig, 'pydeface', metrics_script, orig_nifti, defaced_nifti)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, metrics_script, orig_nifti, defaced_nifti)
         }
+
+    ch_deface_metrics_mri = ch_orig_keyed
+        .join(ch_mri_deface_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, metrics_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_metrics_fsl = ch_orig_keyed
+        .join(ch_fsl_deface_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, metrics_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_metrics_afni = ch_orig_keyed
+        .join(ch_afni_refacer_keyed)
+        .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
+            tuple(meta_def, method, metrics_script, orig_nifti, defaced_nifti)
+        }
+
+    ch_deface_metrics_in = Channel
+        .empty()
+        .mix(ch_deface_metrics_py)
+        .mix(ch_deface_metrics_mri)
+        .mix(ch_deface_metrics_fsl)
+        .mix(ch_deface_metrics_afni)
 
     DEFACE_METRICS(ch_deface_metrics_in)
 
-    /*
-    MRI_DEFACE(ch_benchmark_in)
-    FSL_DEFACE(ch_benchmark_in)
-    AFNI_REFACER(ch_benchmark_in)
-    QUICKSHEAR(ch_benchmark_in)
-    DEEPDEFACER(ch_benchmark_in)
+    // metric manifest for merge
+    ch_metric_manifest = DEFACE_METRICS.out.metrics_publish
+        .map { x -> x instanceof List ? x[-1] : x }
+        .map { p -> p.toString() + '\n' }
+        .collectFile(name: 'metric_files.txt', keepHeader: false, newLine: false)
 
-    ch_all_defaced = Channel
-        .empty()
-        .mix(PYDEFACE.out.defaced)
-        .mix(MRI_DEFACE.out.defaced)
-        .mix(FSL_DEFACE.out.defaced)
-        .mix(AFNI_REFACER.out.defaced)
-        .mix(QUICKSHEAR.out.defaced)
-        .mix(DEEPDEFACER.out.defaced)
-
-    */
-
-    
-
-    pydefaced_t1w = PYDEFACE.out.defaced
+    // detector inputs per method
+    ch_pydeface_t1w = PYDEFACE.out.defaced
         .filter { meta, f -> f.name ==~ /.*_T1w_defaced\.nii(\.gz)?$/ }
+        .map { meta, f -> tuple(meta + [ deface_method: 'pydeface' ], f) }
 
-    DEFACE_DETECTOR(pydefaced_t1w)
+    ch_mri_deface_t1w = MRI_DEFACE.out.defaced
+        .filter { meta, f -> f.name ==~ /.*_T1w_defaced\.nii(\.gz)?$/ }
+        .map { meta, f -> tuple(meta + [ deface_method: 'mri_deface' ], f) }
+
+    ch_fsl_deface_t1w = FSL_DEFACE.out.defaced
+        .filter { meta, f -> f.name ==~ /.*_T1w_defaced\.nii(\.gz)?$/ }
+        .map { meta, f -> tuple(meta + [ deface_method: 'fsl_deface' ], f) }
+
+    ch_afni_refacer_t1w = AFNI_REFACER.out.defaced
+        .filter { meta, f -> f.name ==~ /.*_T1w_defaced\.nii(\.gz)?$/ }
+        .map { meta, f -> tuple(meta + [ deface_method: 'afni_refacer' ], f) }
+
+    ch_all_detector_in = Channel
+        .empty()
+        .mix(ch_pydeface_t1w)
+        .mix(ch_mri_deface_t1w)
+        .mix(ch_fsl_deface_t1w)
+        .mix(ch_afni_refacer_t1w)
+
+    DEFACE_DETECTOR(ch_all_detector_in, detector_script, detector_modeldir)
+
+    // detector manifest with explicit metadata so merge can attach scores/pass to the right row
+    ch_detector_manifest = DEFACE_DETECTOR.out.qc_json
+        .map { meta, f ->
+            def image_name = normalizeDetectorImageName(f)
+            "${meta.subject}\t${meta.session}\t${meta.deface_method}\t${image_name}\t${f.toString()}\n"
+        }
+        .collectFile(name: 'detector_manifest.tsv', keepHeader: false, newLine: false)
+
+    MERGE_BENCHMARK(ch_metric_manifest, ch_detector_manifest, merge_script)
+
     defacedet_out = DEFACE_DETECTOR.out.qc_json.join(DEFACE_DETECTOR.out.qc_pass)
 
-    PYDEFACE.out.defaced.view { meta, f -> "[PYDEFACE DEFACED] ${f.name}" }
-    
-    pydefaced_t1w.view { meta, f -> "[T1W FOR DETECTOR] ${f.name}" }
-
+    // publish defaced files under method-specific subfolders
+    ch_all_defaced_publish = Channel
+        .empty()
+        .mix(
+            PYDEFACE.out.defaced_publish
+                .flatten()
+                .map { p -> [ file: p, rel: "pydeface/${relFromSub(p)}" ] }
+        )
+        .mix(
+            MRI_DEFACE.out.defaced_publish
+                .flatten()
+                .map { p -> [ file: p, rel: "mri_deface/${relFromSub(p)}" ] }
+        )
+        .mix(
+            FSL_DEFACE.out.defaced_publish
+                .flatten()
+                .map { p -> [ file: p, rel: "fsl_deface/${relFromSub(p)}" ] }
+        )
+        .mix(
+            AFNI_REFACER.out.defaced_publish
+                .flatten()
+                .map { p -> [ file: p, rel: "afni_refacer/${relFromSub(p)}" ] }
+        )
 
     emit:
-    //benchmark_defaced = ch_all_defaced
-    benchmark_defaced = pydeface_defaced
-    benchmark_qc      = DEFACE_QC_RENDER.out.qc_publish
-    benchmark_metrics = DEFACE_METRICS.out.metrics_publish
+    benchmark_defaced   = ch_all_defaced_publish
+    benchmark_qc        = DEFACE_QC_RENDER.out.qc_publish
+    benchmark_metrics   = MERGE_BENCHMARK.out.per_subject_method_table
+    benchmark_summary   = MERGE_BENCHMARK.out.summary_table
     benchmark_defacedet = defacedet_out
-    versions          = DCM2BIDS.out.versions
+    versions            = DCM2BIDS.out.versions
 }

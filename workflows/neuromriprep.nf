@@ -3,19 +3,22 @@
     IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { BIDSING           } from '../subworkflows/local/bidsing'
-include { MERGE_BIDS_DATASET} from '../modules/local/mergebidsdataset'
-include { BIDS_VALIDATOR    } from '../modules/local/bidsvalidator'
-include { BIDS_QC_GATE      } from '../modules/local/bidsqcgate'
-include { BIDSIGNORE        } from '../modules/local/bidsignore'
-include { MRIQC_PARTICIPANT } from '../modules/local/mriqcparticipant'
-include { MRIQC_GROUP       } from '../modules/local/mriqcgroup'
-include { FMRIPREP          } from '../modules/local/fmriprep'
-include { PYDEFACE          } from '../modules/local/pydeface'
-include { MRI_DEFACE        } from '../modules/local/mrideface'
-include { MRIQC_PARTICIPANTS} from '../subworkflows/local/mriqc_participants'
+include { BIDSING            } from '../subworkflows/local/bidsing'
+include { MERGE_BIDS_DATASET } from '../modules/local/mergebidsdataset'
+include { BIDS_VALIDATOR     } from '../modules/local/bidsvalidator'
+include { BIDS_QC_GATE       } from '../modules/local/bidsqcgate'
+include { BIDSIGNORE         } from '../modules/local/bidsignore'
 
+include { MRIQC_PARTICIPANTS } from '../subworkflows/local/mriqc_participants'
+include { MRIQC_GROUP        } from '../modules/local/mriqcgroup'
 
+include { FMRIPREP_PARTICIPANTS } from '../subworkflows/local/fmriprep_participants'
+
+include { PYDEFACE           } from '../modules/local/pydeface'
+include { MRI_DEFACE         } from '../modules/local/mrideface'
+include { FSL_DEFACE         } from '../modules/local/fsldeface'
+include { AFNI_REFACER       } from '../modules/local/afnirefacer'
+include { DEEPDEFACER        } from '../modules/local/deepdefacer'
 
 
 /*
@@ -33,13 +36,14 @@ def normalizeSubId(subject) {
 
 workflow NEUROMRIPREP {
 
-
     take:
     ch_samplesheet  // channel: [ val(meta), path(dicom_dir) ]
     ch_config       // channel: path(config_file)
 
     main:
 
+    // Default: enforce the gate unless explicitly disabled
+    def enforce_bidsqc_gate = params.enforce_bidsqc_gate == null ? true : params.enforce_bidsqc_gate
 
     // Extract subject and session from DICOM folder basename
     // Expected format: IRTGXX_SYY: XX is subject and YY is session
@@ -52,7 +56,7 @@ workflow NEUROMRIPREP {
             // Extract subject
             def subject = parts.size() > 1 ? parts[1] : "unknown"
 
-            // Extract session 
+            // Extract session
             def sesStr    = parts.size() > 2 ? parts[2] : ""
             def ses_match = sesStr =~ /S(\d+)/
             def ses       = ses_match ? ses_match[0][1] : "01"
@@ -64,12 +68,10 @@ workflow NEUROMRIPREP {
                 project: meta.project
             ]
 
-            // emit tuple with meta + directory
             tuple(new_meta, dicom_dir)
         }
 
-
-        ch_force = Channel.value( params.force_dcm2bids ?: false )
+    ch_force = Channel.value(params.force_dcm2bids ?: false)
 
     BIDSING(
         ch_input,
@@ -77,12 +79,8 @@ workflow NEUROMRIPREP {
         ch_force
     )
 
-    ch_bids_raw = BIDSING.out.bids_raw
-    ch_versions = BIDSING.out.versions
-
-    ch_bids_raw.view { meta, bids_dir ->
-        log.info "[DEBUG] ch_bids_raw item: ${bids_dir} (name=${bids_dir.name})"
-    }
+    ch_bids_raw  = BIDSING.out.bids_raw
+    ch_versions  = BIDSING.out.versions
 
     ch_sub_dirs = BIDSING.out.bids_sub
         .map { meta, subdir -> subdir }
@@ -96,49 +94,47 @@ workflow NEUROMRIPREP {
 
 
     // merge bids dataset
-
     MERGE_BIDS_DATASET(
-        ch_sub_dirs, 
-        ch_dwi_adc_dirs, 
+        ch_sub_dirs,
+        ch_dwi_adc_dirs,
         ch_logs
     )
 
-    ch_bids_dataset = MERGE_BIDS_DATASET.out.bids_dataset                          //for use
-    ch_bids_dataset_items = MERGE_BIDS_DATASET.out.bids_dataset_items.flatten()   //for publishing
+    ch_bids_dataset       = MERGE_BIDS_DATASET.out.bids_dataset
+    ch_bids_dataset_items = MERGE_BIDS_DATASET.out.bids_dataset_items.flatten()
 
+    ch_dataset_meta = ch_samplesheet
+        .map { meta, _ -> meta }
+        .first()
+        .map { meta -> meta + [ id: 'dataset' ] }
 
-    ch_dataset_meta = ch_samplesheet.map { meta, _ -> meta }.first().map { meta -> meta + [ id: 'dataset' ] }
-
-
-    // read in 
-    ch_ignore_add    = Channel.fromPath('assets/input_pipeline/bidsignore_list.txt')
-    ch_ignore_remove = Channel.fromPath('assets/input_pipeline/bidsignore_remove.txt', checkIfExists: false)
-
-
+    // read in ignore files
+    ch_ignore_add = Channel.value(file('assets/input_pipeline/bidsignore_list.txt', checkIfExists: true))
+    ch_ignore_remove = Channel.value(file('assets/input_pipeline/bidsignore_remove.txt', checkIfExists: true))
 
     ch_bidsignore_in = ch_dataset_meta
-    .combine(ch_bids_dataset)
-    .combine(ch_ignore_add)
-    .combine(ch_ignore_remove)
-    .map { meta, ds, addf, remf -> tuple(meta, ds, addf, remf) }
+        .combine(ch_bids_dataset)
+        .map { meta, ds -> tuple(meta, ds) }
 
-    //bidsignore
-
-    BIDSIGNORE(ch_bidsignore_in)
+    BIDSIGNORE(
+        ch_bidsignore_in,
+        ch_ignore_add,
+        ch_ignore_remove
+    )
 
     ch_bidsval_in = BIDSIGNORE.out.bids_dataset
+    ch_bidsignore = BIDSIGNORE.out.bidsignore_file
 
-    //bidsvalidator
-
+    // bidsvalidator
     BIDS_VALIDATOR(ch_bidsval_in)
 
     ch_bidsval_log = BIDS_VALIDATOR.out.log
 
-    def gate_py    = file(params.bids_qc_script)
-    def allowlist  = file(params.bids_qc_allowlist)
-    def helpers    = params.bids_qc_helpers ? file(params.bids_qc_helpers) : [] 
+    def gate_py   = file(params.bids_qc_script)
+    def allowlist = file(params.bids_qc_allowlist)
+    def helpers   = params.bids_qc_helpers ? file(params.bids_qc_helpers) : []
 
-    ch_bidsval_gate = ch_bidsval_log.map {meta, log ->
+    ch_bidsval_gate = ch_bidsval_log.map { meta, log ->
         tuple(meta, log, gate_py, allowlist, helpers)
     }
 
@@ -147,10 +143,10 @@ workflow NEUROMRIPREP {
     def ch_mriqc_part_publish  = Channel.empty()
     def ch_mriqc_group_publish = Channel.empty()
     def ch_fmriprep_publish    = Channel.empty()
-    def ch_defaced            = Channel.empty()
-    def ch_deface_publish     = Channel.empty()
+    def ch_defaced             = Channel.empty()
+    def ch_deface_publish      = Channel.empty()
 
-    if( params.bidsval_mcheck) {
+    if( params.bidsval_mcheck ) {
         log.warn "[BIDSVAL] Machine check"
     }
 
@@ -158,37 +154,65 @@ workflow NEUROMRIPREP {
 
     ch_bidsqcgate = BIDS_QC_GATE.out.summary
 
-    def ok = false
+    // Dataset-level pass/fail status (because validation happens after merge)
+    ch_bidsqc_status = BIDS_QC_GATE.out.passed
+        .map { meta, passed_file ->
+            def ok = passed_file.text.trim().toBoolean()
+            tuple(meta, ok)
+        }
 
-    ch_bidsqc_passed = BIDS_QC_GATE.out.passed.map { meta, passed_file ->
-        ok = passed_file.text.trim().toBoolean()
-        tuple(meta, ok)
+    // Always report gate result
+    ch_bidsqc_status.view { meta, ok ->
+        def who = meta.id ?: meta.subject ?: 'dataset'
+        "[BIDS] QC gate ${ok ? 'PASSED' : 'FAILED'} for ${who}"
     }
 
+    // Single dataset dir after ignore processing
+    ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset
+        .map { meta, outdir -> outdir }
+        .first()
 
+    // Downstream dataset channel:
+    // - gated by BIDS_QC_GATE if enforce_bidsqc_gate=true
+    // - passes through unchanged if enforce_bidsqc_gate=false
+    def ch_bids_dataset_for_downstream = ch_bids_dataset_after_ignore
 
-    if( params.stop_bidsval & ok) {
+    if( enforce_bidsqc_gate ) {
+        log.warn "[BIDS] BIDS_QC_GATE result will be enforced for downstream execution."
 
-        log.warn "[BIDS] Stopping after BIDS validation. After resolving the issues re-run with -resume and --stop_bidsval false to continue."
+        ch_bidsqc_status
+            .filter { meta, ok -> !ok }
+            .view { meta, ok ->
+                "[BIDS] QC failed. Downstream steps will not run. Fix the issues and re-run with -resume, or use --enforce_bidsqc_gate false to ignore the gate."
+            }
+
+        ch_bids_dataset_for_downstream = ch_bids_dataset_after_ignore
+            .combine(ch_bidsqc_status)
+            .filter { ds, meta, ok -> ok }
+            .map { ds, meta, ok -> ds }
+
+    } else {
+        log.warn "[BIDS] BIDS_QC_GATE result will be reported but ignored because --enforce_bidsqc_gate false."
+    }
+
+    if( params.stop_bidsval ) {
+
+        log.warn "[BIDS] Stopping after BIDS validation because --stop_bidsval true."
 
     } else {
 
-        ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset
-            .map { meta, outdir -> outdir }
-            .first()
-
-
         // Build per-subject inputs: (meta, bids_dataset)
+        // If ch_bids_dataset_for_downstream emits nothing, nothing downstream runs
         ch_mriqc_in = ch_input
-            .map { meta, _ -> meta }                       // meta contains subject/session
-            .combine(ch_bids_dataset_after_ignore)
+            .map { meta, _ -> meta }
+            .combine(ch_bids_dataset_for_downstream)
             .map { meta, ds -> tuple(meta, ds) }
 
         /*
         // Check existing MRIQC subject folders in the chosen output directory
         ch_existing_mriqc_subjects = Channel
             .fromPath("${params.outdir}/derivatives/mriqc/sub-*", type: 'dir', checkIfExists: false)
-            .map { dir -> dir.getName() }                  // e.g. sub-001001
+            .map { dir -> dir.getName() }
             .collect()
             .map { it.toSet() }
 
@@ -219,8 +243,7 @@ workflow NEUROMRIPREP {
         MRIQC_PARTICIPANTS(ch_mriqc_in_filtered, params.mriqc_vpn_file)
         */
 
-
-                //
+        //
         // MRIQC (optional)
         //
         if( params.skip_mriqc ) {
@@ -245,8 +268,9 @@ workflow NEUROMRIPREP {
                 .map { dirs -> dirs.toSet() }
 
             ch_mriqc_group_in = ch_dataset_meta
-                .combine(ch_bids_dataset_after_ignore)
+                .combine(ch_bids_dataset_for_downstream)
                 .combine(ch_mriqc_part_dirs)
+                .map { meta, ds, part_dirs -> tuple(meta, ds, part_dirs) }
 
             MRIQC_GROUP(ch_mriqc_group_in)
 
@@ -254,7 +278,7 @@ workflow NEUROMRIPREP {
 
             ch_mriqc_group_publish = ch_mriqc_group_publish.map { p ->
                 def rel = p.toString().replaceFirst(/^.*\/mriqc_group_out/, '')
-                return [ file: p, rel: rel ]
+                [ file: p, rel: rel ]
             }
 
             if( params.stop_mriqc ) {
@@ -273,60 +297,12 @@ workflow NEUROMRIPREP {
 
             } else {
 
-                // Dataset dir (single value)
-                ch_fmriprep_ds = ch_bids_dataset_after_ignore
+                FMRIPREP_PARTICIPANTS(
+                    ch_input,
+                    ch_bids_dataset_for_downstream
+                )
 
-                // per-subject meta channel: one item per subject
-                ch_fmriprep_meta = ch_input
-                    .map { meta, _ -> meta }
-                    .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
-
-                // restrict to a VPN list file (one subject per line, allow "sub-XXX")
-                if( params.fmriprep_vpn_file ) {
-                    def vpn_set = file(params.fmriprep_vpn_file)
-                        .text
-                        .readLines()
-                        .collect { it.replace('\r','').trim() }
-                        .findAll { it }
-                        .collect { it.replaceFirst(/^sub-/, '') }
-                        .toSet()
-
-                    ch_fmriprep_meta = ch_fmriprep_meta.filter { meta ->
-                        vpn_set.contains(meta.subject.toString().replaceFirst(/^sub-/, ''))
-                    }
-                }
-
-                def bf = params.fmriprep_bids_filter ? params.fmriprep_bids_filter.toString() : null
-                def bf_path = null
-                if( bf ) {
-                    if( bf == 'ses01' )      bf_path = '/nic/sw/IRTG/scripts/bids-filter-file/filter_ses01.json'
-                    else if( bf == 'ses02' ) bf_path = '/nic/sw/IRTG/scripts/bids-filter-file/filter_ses02.json'
-                    else                     bf_path = bf
-                }
-
-                def ch_bids_filter = bf_path \
-                    ? Channel.value(file(bf_path)) \
-                    : Channel.value(file("${projectDir}/assets/empty_bids_filter.json"))
-
-                // FreeSurfer license
-                def ch_fs_license = Channel.value( file(params.fmriprep_fs_license) )
-
-                // structure inputs for module
-                ch_fmriprep_in = ch_fmriprep_meta
-                    .combine(ch_fmriprep_ds)
-                    .combine(ch_fs_license)
-                    .combine(ch_bids_filter)
-                    .map { meta, ds, lic, filt -> [meta, ds, lic, filt] }
-
-                // Run fMRIPrep
-                FMRIPREP(ch_fmriprep_in)
-
-                ch_fmriprep_pub = FMRIPREP.out.fmriprep_publish.flatten()
-
-                ch_fmriprep_publish = ch_fmriprep_pub.map { p ->
-                    def rel = p.toString().replaceFirst(/^.*[\\\/]fmriprep_out_[^\/]+\//, '')
-                    return [ file: p, rel: rel ]
-                }
+                ch_fmriprep_publish = FMRIPREP_PARTICIPANTS.out.fmriprep_publish
 
                 if( params.stop_fmriprep ) {
                     log.warn "[FMRIPREP] Stopping after FMRIPREP. After resolving the issues re-run with -resume and --stop_fmriprep false to continue."
@@ -339,15 +315,15 @@ workflow NEUROMRIPREP {
         //
         if( !params.stop_fmriprep || params.skip_fmriprep ) {
 
-            // Dataset dir (single value)
-            def ch_deface_ds = ch_bids_dataset_after_ignore
+            // Dataset dir (single value, possibly gated)
+            def ch_deface_ds = ch_bids_dataset_for_downstream
 
             // Per-subject/session meta
             def ch_deface_meta = ch_input
                 .map { meta, _ -> meta }
                 .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
 
-            // vpn list
+            // VPN list
             if( params.pydeface_vpn_file ) {
                 def vpn_set = file(params.pydeface_vpn_file)
                     .text
@@ -373,7 +349,7 @@ workflow NEUROMRIPREP {
                         ?.findAll { it.name.endsWith('.nii.gz') && !it.name.endsWith('_defaced.nii.gz') }
                         ?: []
 
-                    return niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
+                    niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
                 }
 
             if( params.deface_tool == 'mri_deface' ) {
@@ -389,7 +365,7 @@ workflow NEUROMRIPREP {
                         def i = parts.findIndexOf { it.startsWith('sub-') }
                         if( i < 0 ) error "Could not derive rel path from: ${s}"
                         def rel = parts[i..-1].join('/')
-                        return [ file: p, rel: rel ]
+                        [ file: p, rel: rel ]
                     }
 
             } else if( params.deface_tool == 'pydeface' ) {
@@ -405,7 +381,55 @@ workflow NEUROMRIPREP {
                         def i = parts.findIndexOf { it.startsWith('sub-') }
                         if( i < 0 ) error "Could not derive rel path from: ${s}"
                         def rel = parts[i..-1].join('/')
-                        return [ file: p, rel: rel ]
+                        [ file: p, rel: rel ]
+                    }
+
+            } else if( params.deface_tool == 'fsl_deface' ) {
+
+                FSL_DEFACE(ch_deface_in)
+                ch_defaced = FSL_DEFACE.out.defaced
+
+                ch_deface_publish = FSL_DEFACE.out.defaced_publish
+                    .flatten()
+                    .map { p ->
+                        def s = p.toString()
+                        def parts = s.split(/[\\\/]+/)
+                        def i = parts.findIndexOf { it.startsWith('sub-') }
+                        if( i < 0 ) error "Could not derive rel path from: ${s}"
+                        def rel = parts[i..-1].join('/')
+                        [ file: p, rel: rel ]
+                    }
+
+            } else if( params.deface_tool == 'afni_refacer' ) {
+
+                AFNI_REFACER(ch_deface_in)
+                ch_defaced = AFNI_REFACER.out.defaced
+
+                ch_deface_publish = AFNI_REFACER.out.defaced_publish
+                    .flatten()
+                    .map { p ->
+                        def s = p.toString()
+                        def parts = s.split(/[\\\/]+/)
+                        def i = parts.findIndexOf { it.startsWith('sub-') }
+                        if( i < 0 ) error "Could not derive rel path from: ${s}"
+                        def rel = parts[i..-1].join('/')
+                        [ file: p, rel: rel ]
+                    }
+
+            } else if( params.deface_tool == 'deepdefacer' ) {
+
+                DEEPDEFACER(ch_deface_in)
+                ch_defaced = DEEPDEFACER.out.defaced
+
+                ch_deface_publish = DEEPDEFACER.out.defaced_publish
+                    .flatten()
+                    .map { p ->
+                        def s = p.toString()
+                        def parts = s.split(/[\\\/]+/)
+                        def i = parts.findIndexOf { it.startsWith('sub-') }
+                        if( i < 0 ) error "Could not derive rel path from: ${s}"
+                        def rel = parts[i..-1].join('/')
+                        [ file: p, rel: rel ]
                     }
 
             } else {
@@ -414,10 +438,11 @@ workflow NEUROMRIPREP {
         }
     }
 
-    
     emit:
     dcm2bids_merge      = ch_bids_dataset_items
     bidsgate_report     = ch_bidsqcgate
+    bidsval_report      = ch_bidsval_log
+    bidsignore_file     = ch_bidsignore
     mriqc_part_publish  = ch_mriqc_part_publish
     mriqc_group_publish = ch_mriqc_group_publish
     fmriprep_publish    = ch_fmriprep_publish

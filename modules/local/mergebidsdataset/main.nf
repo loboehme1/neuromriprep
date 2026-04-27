@@ -1,21 +1,17 @@
 process MERGE_BIDS_DATASET {
 
-
     label 'process_single'
 
     container "${ task.ext.container ?: '/home/loboehme/Documents/container/docker-curl-jq.sif' }"
 
     input:
-    path sub_dirs,          stageAs: 'in_subjects/*'
-    path dwi_adc_sub_dirs,  stageAs: 'in_adc/*'
-    path log_files,         stageAs: 'in_logs/*'
+    path sub_dirs,          stageAs: 'in_subjects??/*'
+    path dwi_adc_sub_dirs,  stageAs: 'in_adc??/*'
+    path log_files,         stageAs: 'in_logs??/*'
 
-    //output folder and contents to get structured outputs
     output:
     path "bids_dataset"   , emit: bids_dataset
     path "bids_dataset/*" , emit: bids_dataset_items
-
-
 
     script:
     """
@@ -32,30 +28,29 @@ process MERGE_BIDS_DATASET {
     }
     EOF
 
-    # Merge subjects (FOLLOW symlinks + copy contents)
+    # Merge subjects (copy on write reflinks)
     for s in ${sub_dirs}; do
       [ -d "\$s" ] || continue
-      dest="bids_dataset/\$(basename "\$s")"         
-      mkdir -p "\$dest"                               
-      cp -aL "\$s/." "\$dest/"                        
+      dest="bids_dataset/\$(basename "\$s")"
+      mkdir -p "\$dest"
+      cp -a --reflink=always "\$s/." "\$dest/"
     done
 
-    # Merge ADC derivatives (FOLLOW symlinks + copy contents)
+    # Merge ADC derivatives (copy on write reflinks)
     for d in ${dwi_adc_sub_dirs}; do
       [ -d "\$d" ] || continue
-      dest="bids_dataset/derivatives/dwi_ADC/\$(basename "\$d")"   
-      mkdir -p "\$dest"                                            
-      cp -aL "\$d/." "\$dest/"                                     
+      dest="bids_dataset/derivatives/dwi_ADC/\$(basename "\$d")"
+      mkdir -p "\$dest"
+      cp -a --reflink=always "\$d/." "\$dest/"
     done
 
     # Collect logs
     for lf in ${log_files}; do
       [ -f "\$lf" ] || continue
-      cp -a "\$lf" "bids_dataset/logs_dcm2bids/"      
+      cp -a "\$lf" "bids_dataset/logs_dcm2bids/"
     done
 
     ls -la bids_dataset
-
-    find bids_dataset -type l -print || true                        
+    find bids_dataset -type l -print || true
     """
 }

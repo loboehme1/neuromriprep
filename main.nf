@@ -52,7 +52,7 @@ workflow NFCORE_NEUROMRIPREP {
             ]
             [ meta, file(row.dicom_dir) ]
         }
-        .view()
+        //.view() # uncomment to print every samplesheet entry for debugging
 
     ch_config = Channel.fromPath(params.dcm2bids_config, checkIfExists: true)
 
@@ -69,6 +69,8 @@ workflow NFCORE_NEUROMRIPREP {
     emit:
     dcm2bids_merge      = NEUROMRIPREP.out.dcm2bids_merge
     bidsgate_report     = NEUROMRIPREP.out.bidsgate_report
+    bidsval_report      = NEUROMRIPREP.out.bidsval_report
+    bidsignore_file     = NEUROMRIPREP.out.bidsignore_file
     mriqc_part_publish  = NEUROMRIPREP.out.mriqc_part_publish
     mriqc_group_publish = NEUROMRIPREP.out.mriqc_group_publish
     fmriprep_publish    = NEUROMRIPREP.out.fmriprep_publish
@@ -102,11 +104,12 @@ workflow NFCORE_DEFACE_BENCHMARK {
     )
 
     emit:
-    benchmark_defaced = DEFACE_BENCHMARK.out.benchmark_defaced
-    benchmark_qc      = DEFACE_BENCHMARK.out.benchmark_qc
-    benchmark_metrics = DEFACE_BENCHMARK.out.benchmark_metrics
+    benchmark_defaced  = DEFACE_BENCHMARK.out.benchmark_defaced
+    benchmark_qc       = DEFACE_BENCHMARK.out.benchmark_qc
+    benchmark_metrics  = DEFACE_BENCHMARK.out.benchmark_metrics
+    benchmark_summary  = DEFACE_BENCHMARK.out.benchmark_summary
     benchmark_defacedet= DEFACE_BENCHMARK.out.benchmark_defacedet
-    versions          = DEFACE_BENCHMARK.out.versions
+    versions           = DEFACE_BENCHMARK.out.versions
 }
 
 /*
@@ -164,14 +167,17 @@ workflow {
     // initialize everything as empty
     merge_out             = Channel.empty()
     bidsqc_out            = Channel.empty()
+    bidsignore_out        = Channel.empty()
+    bidsval_out           = Channel.empty()
     mriqc_part_out        = Channel.empty()
     mriqc_group_out       = Channel.empty()
     fmriprep_out          = Channel.empty()
-    deface_out          = Channel.empty()
+    deface_out            = Channel.empty()
 
     benchmark_metrics_out   = Channel.empty()
     benchmark_qc_out        = Channel.empty()
-    benchmark_files_out     = Channel.empty()
+    benchmark_files_out     = Channel.empty()  
+    benchmark_summary_out   = Channel.empty()
     benchmark_defacedet_out = Channel.empty()
 
 
@@ -180,17 +186,20 @@ workflow {
 
         merge_out      = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
         bidsqc_out     = NFCORE_NEUROMRIPREP.out.bidsgate_report
+        bidsval_out    = NFCORE_NEUROMRIPREP.out.bidsval_report
+        bidsignore_out = NFCORE_NEUROMRIPREP.out.bidsignore_file
         mriqc_part_out = NFCORE_NEUROMRIPREP.out.mriqc_part_publish
         mriqc_group_out= NFCORE_NEUROMRIPREP.out.mriqc_group_publish
         fmriprep_out   = NFCORE_NEUROMRIPREP.out.fmriprep_publish
-        deface_out   = NFCORE_NEUROMRIPREP.out.deface_publish
+        deface_out     = NFCORE_NEUROMRIPREP.out.deface_publish
     }
     else if( params.mode == 'benchmark_defacing' ) {
         NFCORE_DEFACE_BENCHMARK()
 
-        benchmark_metrics_out = NFCORE_DEFACE_BENCHMARK.out.benchmark_metrics
-        benchmark_qc_out      = NFCORE_DEFACE_BENCHMARK.out.benchmark_qc
-        benchmark_files_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaced
+        benchmark_metrics_out     = NFCORE_DEFACE_BENCHMARK.out.benchmark_metrics
+        benchmark_qc_out          = NFCORE_DEFACE_BENCHMARK.out.benchmark_qc
+        benchmark_files_out       = NFCORE_DEFACE_BENCHMARK.out.benchmark_defaced
+        benchmark_summary_out     = NFCORE_DEFACE_BENCHMARK.out.benchmark_summary
         benchmark_defacedet_out   = NFCORE_DEFACE_BENCHMARK.out.benchmark_defacedet
     }
     else {
@@ -200,6 +209,8 @@ workflow {
     publish:
     merge_out             = merge_out
     bidsqc_out            = bidsqc_out
+    bidsval_out           = bidsval_out
+    bidsignore_out        = bidsignore_out
     mriqc_part_out        = mriqc_part_out
     mriqc_group_out       = mriqc_group_out
     fmriprep_out          = fmriprep_out
@@ -209,6 +220,7 @@ workflow {
     benchmark_metrics_out = benchmark_metrics_out
     benchmark_qc_out      = benchmark_qc_out
     benchmark_files_out   = benchmark_files_out
+    benchmark_summary_out = benchmark_summary_out
     benchmark_defacedet_out=benchmark_defacedet_out
 
 }
@@ -226,6 +238,15 @@ output {
     // BIDSGATE
     bidsqc_out {
         path {f -> f >> f.name }
+    }
+    
+    // BIDSVALIDATOR
+    bidsval_out {
+        path { meta, f -> f >> f.name }
+    }
+
+    bidsignore_out {
+        path { meta, f -> f >> f.name }
     }
 
     // MRIQC participant output --> derivatives/mriqc
@@ -268,14 +289,19 @@ output {
         }
     }
 
+    benchmark_summary_out {
+        path { f -> f >> "benchmark_defacing/summary/${f.name}" }
+    }
+
     benchmark_files_out {
         path 'benchmark_defacing/defaced'
     }
 
     benchmark_defacedet_out {
         path { meta, qc_json, qc_pass ->
-            qc_json >> "benchmark_defacedet/defacedet/${qc_json.name}"
-            qc_pass >> "benchmark_defacedet/defacedet/${qc_pass.name}"
+            def method = meta.deface_method ?: "unknown"
+            qc_json >> "benchmark_defacedet/defacedet/${method}/${qc_json.name}"
+            qc_pass >> "benchmark_defacedet/defacedet/${method}/${qc_pass.name}"
         }
     }
 }
