@@ -122,8 +122,11 @@ workflow NEUROMRIPREP {
         ch_ignore_remove
     )
 
-    ch_bidsval_in = BIDSIGNORE.out.bids_dataset
+    ch_bidsignore_dataset = BIDSIGNORE.out.bids_dataset
     ch_bidsignore = BIDSIGNORE.out.bidsignore_file
+
+    ch_bidsval_in = ch_bidsignore_dataset
+        .join(ch_bidsignore)
 
     // bidsvalidator
     BIDS_VALIDATOR(ch_bidsval_in)
@@ -168,7 +171,7 @@ workflow NEUROMRIPREP {
     }
 
     // Single dataset dir after ignore processing
-    ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset
+    ch_bids_dataset_after_ignore = ch_bidsignore_dataset
         .map { meta, outdir -> outdir }
         .first()
 

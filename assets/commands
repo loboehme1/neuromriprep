@@ -1,0 +1,13 @@
+nextflow run main.nf  \
+	-profile apptainer  \
+	--input assets/samplesheet.csv  \
+	--outdir /home/loboehme/Documents/irtg_test/inout25 \
+	--mode production \
+	--stop_mriqc false \
+	--stop_fmriprep false \
+	--skip_mriqc true \
+	--skip_fmriprep true \
+	--deface_tool pydeface
+
+
+nextflow run main.nf   -profile apptainer   --input assets/samplesheet_gen.csv   --outdir /home/loboehme/Documents/irtg_test/benchall1  --mode benchmark_defacing -resume

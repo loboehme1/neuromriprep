@@ -12,7 +12,7 @@ process BIDSIGNORE {
     path(ignore_remove)
 
     output:
-    tuple val(meta), path("bids_dataset"),                           emit: bids_dataset
+    tuple val(meta), path("bids_dataset"), emit: bids_dataset
     tuple val(meta), path("bids_dataset/.bidsignore", hidden: true), emit: bidsignore_file
     path("*.log"), emit: log
     path("versions.yml"), emit: versions
