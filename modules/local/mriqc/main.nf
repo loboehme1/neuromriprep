@@ -2,7 +2,6 @@ process MRIQC {
     tag "$meta.id"
     label 'process_medium'
 
-    //container "$( task.ext.container ?: /nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif)"
 
     container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
 

@@ -1,67 +1,51 @@
 process MRIQC_GROUP {
 
-    tag "${meta.id}"
-    label 'process_medium'
+    tag "${meta.id ?: meta.project ?: 'dataset'}"
 
-    container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
-  /*
-    publishDir {
-        params.mriqc_group_outdir ?: "${params.outdir}/derivatives/mriqc"
-    }, mode: 'copy', overwrite: true
-*/
     input:
-    tuple val(meta), path(bids_dataset, stageAs: 'input_bids'), path(participant_dirs, stageAs: 'participants/*')
+    tuple val(meta), path(bids_dataset), path(mriqc_participant_out)
 
     output:
-    tuple val(meta), path("mriqc_group_out/"), emit: mriqc_group_out
-    path("mriqc_group_out/**"),     emit: mriqc_group_publish
-    path "mriqc_group.log", emit: log
-    path "mriqc_group.errwarn.log", emit: errwarn
+    path "mriqc_group_out/**", emit: mriqc_group_publish
+    path "logs/**", optional: true, emit: mriqc_log
     path "versions.yml", emit: versions
 
     script:
-    def args   = task.ext.args ?: ''
-    def mem_gb = task.ext.mem_gb ?: 4
-
-    def mriqc_cmd = task.ext.mriqc_bin ?: '/opt/conda/bin/mriqc'
-
     """
     set -euo pipefail
 
-    echo "[INFO] mriqc_cmd=${mriqc_cmd}" | tee -a mriqc_group.log
-    command -v ${mriqc_cmd} 2>&1 | tee -a mriqc_group.log || true
-    ${mriqc_cmd} --version 2>&1 | tee -a mriqc_group.log
+    BIDS_DIR="\$(realpath "${bids_dataset}")"
 
-    mkdir -p mriqc_group_out work_dir
+    mkdir -p mriqc_group_out
+    mkdir -p mriqc_group_work
+    mkdir -p logs/logs_group
 
-    # Merge participant outputs into the outdir 
-    shopt -s nullglob dotglob
-    for d in participants/*; do
-      if [[ -d "\$d" ]]; then
-        files=( "\$d"/* )
-        if (( \${#files[@]} )); then
-          cp -r "\${files[@]}" mriqc_group_out/
-        fi
-      fi
-    done
-    shopt -u nullglob dotglob
+    # MRIQC group expects the participant outputs already in /output_dir.
+    cp -a "${mriqc_participant_out}/." mriqc_group_out/
 
-    ${mriqc_cmd} \\
-      input_bids \\
-      mriqc_group_out \\
-      group \\
-      --mem_gb ${mem_gb} \\
-      --no-sub \\
-      --work-dir work_dir \\
-      -v \\
-      ${args} \\
-      2>&1 | tee -a mriqc_group.log
+    LOGFILE="logs/logs_group/mriqc_errlog_\$(date +'%Y-%m-%d-%H-%M').txt"
 
-    grep -i -e "warning" -e "error" mriqc_group.log > mriqc_group.errwarn.log || true
+    echo "MRIQC Processing Log Group - \$(date)" > "\$LOGFILE"
+    echo "Input directory: \$BIDS_DIR" | tee -a "\$LOGFILE"
+    echo "Output directory: \$PWD/mriqc_group_out" | tee -a "\$LOGFILE"
+    echo "Working directory: \$PWD/mriqc_group_work" | tee -a "\$LOGFILE"
+
+    apptainer run \\
+        -B "\$PWD/mriqc_group_work:/work_dir" \\
+        -B "\$BIDS_DIR:/input_dir:ro" \\
+        -B "\$PWD/mriqc_group_out:/output_dir" \\
+        "/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif" \\
+        "/input_dir" \\
+        "/output_dir" \\
+        group \\
+        --mem_gb "${task.memory.toGiga()}" \\
+        --no-sub \\
+        --work-dir "/work_dir" \\
+        2>&1 | tee -a "\$LOGFILE"
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-      mriqc: \$(${mriqc_cmd} --version 2>&1 | sed 's/MRIQC v//g' || echo "unknown")
+        mriqc: 25.0.0rc0
     END_VERSIONS
     """
 }

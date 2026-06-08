@@ -1,55 +1,58 @@
 process MRIQC_PARTICIPANT {
 
-    tag "${meta.subject}"
-    label 'process_high'
-
-    container "${ task.ext.container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif' }"
-
+    tag "${meta.id ?: meta.project ?: 'dataset'}"
 
     input:
-    tuple val(meta), path(bids_dataset, stageAs: 'input_bids')
+    tuple val(meta), path(bids_dataset), val(participant_labels)
 
     output:
-    tuple val(meta), path("mriqc_out_${meta.subject}/"), emit: mriqc_out
-    path("mriqc_out_${meta.subject}/**")               , emit: mriqc_publish  // for publishing
-    path "mriqc_participant.log"                      , emit: mriqc_log
-    path "versions.yml"                               , emit: versions
+    tuple val(meta), path("mriqc_participant_out"), emit: mriqc_out
+    path "mriqc_participant_out/**", emit: mriqc_publish
+    path "logs/**", optional: true, emit: mriqc_log
+    path "versions.yml", emit: versions
 
     script:
-    def args        = task.ext.args ?: ''
-    def mem_gb      = task.ext.mem_gb ?: 16
-    def nprocs      = task.ext.nprocs ?: (task.cpus ?: 16)
-    def threads     = task.ext.omp_threads ?: 4
-    def participant = meta.subject.toString()
-    def outdir      = "mriqc_out_${participant}"
-
-    def mriqc_cmd = task.ext.mriqc_bin ?: '/opt/conda/bin/mriqc'
+    def labels_arg = participant_labels && participant_labels.size() > 0
+        ? "--participant-label ${participant_labels.join(' ')}"
+        : ""
 
     """
     set -euo pipefail
 
-    command -v ${mriqc_cmd} 2>&1 | tee -a mriqc_participant.log || true
-    ${mriqc_cmd} --version 2>&1 | tee -a mriqc_participant.log
+    BIDS_DIR="\$(realpath "${bids_dataset}")"
 
-    mkdir -p ${outdir}
+    mkdir -p mriqc_participant_out
+    mkdir -p mriqc_work
+    mkdir -p logs/logs_subjects
 
-    ${mriqc_cmd} \\
-      input_bids \\
-      ${outdir} \\
-      participant \\
-      --participant-label ${participant} \\
-      --nprocs ${nprocs} \\
-      --omp-nthreads ${threads} \\
-      --mem_gb ${mem_gb} \\
-      --no-sub \\
-      -v \\
-      --verbose-reports \\
-      ${args} \\
-      2>&1 | tee -a mriqc_participant.log
+    LOGFILE="logs/logs_subjects/mriqc_errlog_\$(date +"%Y-%m-%d-%H-%M")_\$\$.txt"
+
+    echo "MRIQC Processing Log - \$(date)" | tee -a "\$LOGFILE"
+    echo "Input directory: \$BIDS_DIR" | tee -a "\$LOGFILE"
+    echo "Output directory: \$PWD/mriqc_participant_out" | tee -a "\$LOGFILE"
+    echo "Working directory: \$PWD/mriqc_work" | tee -a "\$LOGFILE"
+
+    apptainer run \\
+        -B "\$PWD/mriqc_work:/work_dir" \\
+        -B "\$BIDS_DIR:/input_dir:ro" \\
+        -B "\$PWD/mriqc_participant_out:/output_dir" \\
+        "${params.mriqc_container ?: '/nic/sw/IRTG/sif/mriqc_25.0.0rc0.sif'}" \\
+        "/input_dir" \\
+        "/output_dir" \\
+        participant \\
+        ${labels_arg} \\
+        --nprocs "${task.cpus}" \\
+        --omp-nthreads "${params.mriqc_omp_threads ?: 4}" \\
+        --mem_gb "${task.memory.toGiga()}" \\
+        --no-sub \\
+        -v \\
+        --verbose-reports \\
+        --work-dir "/work_dir" \\
+        2> >(grep -Ev 'it/s]' | tee -a "\$LOGFILE" >&2)
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-      mriqc: \$(${mriqc_cmd} --version 2>&1 | sed 's/MRIQC v//g' || echo "unknown")
+        mriqc: 25.0.0rc0
     END_VERSIONS
     """
 }

@@ -204,47 +204,12 @@ workflow NEUROMRIPREP {
 
     } else {
 
-        // Build per-subject inputs: (meta, bids_dataset)
-        // If ch_bids_dataset_for_downstream emits nothing, nothing downstream runs
-        ch_mriqc_in = ch_input
-            .map { meta, _ -> meta }
+        // MRIQC is dataset-level, matching the original bash scripts.
+        // It runs once on the merged BIDS dataset, optionally restricted by --participant-label.
+        ch_mriqc_dataset_in = ch_dataset_meta
             .combine(ch_bids_dataset_for_downstream)
             .map { meta, ds -> tuple(meta, ds) }
 
-        /*
-        // Check existing MRIQC subject folders in the chosen output directory
-        ch_existing_mriqc_subjects = Channel
-            .fromPath("${params.outdir}/derivatives/mriqc/sub-*", type: 'dir', checkIfExists: false)
-            .map { dir -> dir.getName() }
-            .collect()
-            .map { it.toSet() }
-
-        // Filter out subjects that already exist in derivatives/mriqc
-        ch_mriqc_in_filtered = ch_mriqc_in
-            .combine(ch_existing_mriqc_subjects)
-            .filter { meta, ds, done_subjects ->
-                !done_subjects.contains(normalizeSubId(meta.subject))
-            }
-            .map { meta, ds, done_subjects ->
-                tuple(meta, ds)
-            }
-
-        // Optional: log which subjects are skipped
-        ch_mriqc_skipped = ch_mriqc_in
-            .combine(ch_existing_mriqc_subjects)
-            .filter { meta, ds, done_subjects ->
-                done_subjects.contains(normalizeSubId(meta.subject))
-            }
-            .map { meta, ds, done_subjects ->
-                normalizeSubId(meta.subject)
-            }
-
-        ch_mriqc_skipped.view { s ->
-            "[MRIQC] Skipping already processed subject found in ${params.outdir}/derivatives/mriqc: ${s}"
-        }
-
-        MRIQC_PARTICIPANTS(ch_mriqc_in_filtered, params.mriqc_vpn_file)
-        */
 
         //
         // MRIQC (optional)
@@ -255,32 +220,40 @@ workflow NEUROMRIPREP {
 
         } else {
 
-            MRIQC_PARTICIPANTS(ch_mriqc_in, params.mriqc_vpn_file)
+            /*
+            * MRIQC_PARTICIPANTS now runs once at dataset level.
+            * It should output one complete MRIQC participant output directory,
+            * not one mriqc_out_<subject> directory per samplesheet row.
+            */
+            MRIQC_PARTICIPANTS(
+                ch_mriqc_dataset_in,
+                params.mriqc_vpn_file
+            )
 
-            // restructure for output to look as expected
+            // Publish participant-level MRIQC outputs
             ch_mriqc_part_pub = MRIQC_PARTICIPANTS.out.mriqc_out_pub.flatten()
 
             ch_mriqc_part_publish = ch_mriqc_part_pub.map { p ->
-                def rel = p.toString().replaceFirst(/^.*\/mriqc_out_[^\/]+\//, '')
+                def rel = p.toString().replaceFirst(/^.*\/mriqc_participant_out\//, '')
                 [ file: p, rel: rel ]
             }
 
-            ch_mriqc_part_dirs = MRIQC_PARTICIPANTS.out.mriqc_out
-                .map { meta, outdir -> outdir }
-                .collect()
-                .map { dirs -> dirs.toSet() }
-
-            ch_mriqc_group_in = ch_dataset_meta
-                .combine(ch_bids_dataset_for_downstream)
-                .combine(ch_mriqc_part_dirs)
-                .map { meta, ds, part_dirs -> tuple(meta, ds, part_dirs) }
-
-            MRIQC_GROUP(ch_mriqc_group_in)
+            /*
+            * MRIQC_GROUP receives:
+            *   meta
+            *   BIDS dataset
+            *   the single participant MRIQC output directory
+            *
+            * No collect(), no set of per-subject dirs, no duplicate basenames.
+            */
+            MRIQC_GROUP(
+                MRIQC_PARTICIPANTS.out.mriqc_group_in
+            )
 
             ch_mriqc_group_publish = MRIQC_GROUP.out.mriqc_group_publish.flatten()
 
             ch_mriqc_group_publish = ch_mriqc_group_publish.map { p ->
-                def rel = p.toString().replaceFirst(/^.*\/mriqc_group_out/, '')
+                def rel = p.toString().replaceFirst(/^.*\/mriqc_group_out\//, '')
                 [ file: p, rel: rel ]
             }
 

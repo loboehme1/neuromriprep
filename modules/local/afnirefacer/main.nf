@@ -48,20 +48,6 @@ process AFNI_REFACER {
     anonymize_opt="!{params.afni_refacer_anonymize ?: false}"
     no_images_opt="!{params.afni_refacer_no_images ?: true}"
 
-    {
-      echo "=== AFNI_REFACER ==="
-      echo "BIDS_DIR:      !{bids_dir}"
-      echo "INPUT:         !{nifti}"
-      echo "OUTPUT:        $out_file"
-      echo "PREFIX:        $prefix_noext"
-      echo "BINARY:        $afni_refacer_bin"
-      echo "CPUS:          !{task.cpus}"
-      echo "OMP_THREADS:   $OMP_THREADS"
-      echo "DATE:          $(date -Is)"
-      echo "===================="
-      echo
-    } | tee -a "$out_log"
-
     # Skip if input already looks defaced, but still create declared output
     if [[ "$base" == *"_defaced" ]] || [[ "$base" == *"_deface" ]]; then
       echo "[SKIP] Input already looks defaced: $base" | tee -a "$out_log"
