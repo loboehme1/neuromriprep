@@ -296,7 +296,7 @@ workflow NEUROMRIPREP {
 
             // Per-subject/session meta
             def ch_deface_meta = ch_input
-                .map { meta, _ -> meta }
+                .map { meta, ignored -> meta }
                 .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
 
             // VPN list
