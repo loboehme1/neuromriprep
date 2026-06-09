@@ -255,13 +255,13 @@ output {
         path 'benchmark_defacing/defaced'
     }
 
+    // DEFACE DETECT output --> see if it still works after change
     benchmark_defacedet_out {
-        path { meta, qc_json, qc_pass ->
-            def method = meta.deface_method ?: "unknown"
-            qc_json >> "benchmark_defacedet/defacedet/${method}/${qc_json.name}"
-            qc_pass >> "benchmark_defacedet/defacedet/${method}/${qc_pass.name}"
-        }
+    path { meta, qc_json, qc_pass ->
+        qc_json >> "benchmark_defacedet/defacedet/${(meta.deface_method ?: 'unknown')}/${qc_json.name}"
+        qc_pass >> "benchmark_defacedet/defacedet/${(meta.deface_method ?: 'unknown')}/${qc_pass.name}"
     }
+}
 }
 
 

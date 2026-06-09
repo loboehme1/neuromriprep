@@ -15,6 +15,37 @@ include { DEFACE_METRICS      } from '../modules/local/defacemetrics'
 include { DEFACE_DETECTOR     } from '../modules/local/defacedetector'
 include { MERGE_BENCHMARK     } from '../modules/local/mergebenchmark'
 
+
+def stripNii(f) {
+    def n = f.name
+    n = n.replaceFirst(/\.nii\.gz$/, '')
+    n = n.replaceFirst(/\.nii$/, '')
+    return n
+}
+
+
+def normalizeDetectorImageName(p) {
+    def n = p.name
+    n = n.replaceFirst(/\.deface_qc\.json$/, '')
+    n = n.replaceFirst(/\.json$/, '')
+    n = n.replaceFirst(/_defaced$/, '')
+    return n
+}
+
+
+def relFromSub(p) {
+    def s = p.toString()
+    def parts = s.split(/[\\\/]+/)
+    def i = parts.findIndexOf { part -> part.startsWith('sub-') }
+
+    if (i < 0) {
+        throw new IllegalArgumentException("Could not derive rel path from: ${s}")
+    }
+
+    return parts[i..-1].join('/')
+}
+
+
 workflow DEFACE_BENCHMARK {
 
     take:
@@ -38,6 +69,7 @@ workflow DEFACE_BENCHMARK {
                 session: session,
                 project: meta.project
             ]
+
             tuple(new_meta, dicom_dir)
         }
 
@@ -55,6 +87,7 @@ workflow DEFACE_BENCHMARK {
             def meta            = row[0]
             def dicom_dir       = row[1]
             def modified_config = row[2]
+
             tuple(meta, dicom_dir, modified_config)
         }
 
@@ -72,48 +105,39 @@ workflow DEFACE_BENCHMARK {
     ch_bids_dataset = MERGE_BIDS_DATASET.out.bids_dataset
 
     ch_dataset_meta = ch_samplesheet
-        .map { meta, _ -> meta }
+        .map { meta, ignored -> meta }
         .first()
         .map { meta -> meta + [ id: 'dataset' ] }
 
-    ch_ignore_add    = Channel.fromPath('assets/input_pipeline/bidsignore_list.txt')
-    ch_ignore_remove = Channel.fromPath('assets/input_pipeline/bidsignore_remove.txt', checkIfExists: false)
+    // Read in ignore files, same pattern as NEUROMRIPREP
+    ch_ignore_add = Channel.value(file('assets/input_pipeline/bidsignore_list.txt', checkIfExists: true))
+    ch_ignore_remove = Channel.value(file('assets/input_pipeline/bidsignore_remove.txt', checkIfExists: true))
 
     ch_bidsignore_in = ch_dataset_meta
         .combine(ch_bids_dataset)
-        .combine(ch_ignore_add)
-        .combine(ch_ignore_remove)
-        .map { meta, ds, addf, remf -> tuple(meta, ds, addf, remf) }
+        .map { meta, ds ->
+            tuple(meta, ds)
+        }
 
-    BIDSIGNORE(ch_bidsignore_in)
-    BIDS_VALIDATOR(BIDSIGNORE.out.bids_dataset)
+    BIDSIGNORE(
+        ch_bidsignore_in,
+        ch_ignore_add,
+        ch_ignore_remove
+    )
 
-    ch_bids_dataset_after_ignore = BIDSIGNORE.out.bids_dataset
-        .map { meta, outdir -> outdir }
+    ch_bidsignore_dataset = BIDSIGNORE.out.bids_dataset
+    ch_bidsignore         = BIDSIGNORE.out.bidsignore_file
+
+    ch_bidsval_in = ch_bidsignore_dataset
+        .join(ch_bidsignore)
+
+    BIDS_VALIDATOR(ch_bidsval_in)
+
+    ch_bids_dataset_after_ignore = ch_bidsignore_dataset
+        .map { meta, outdir ->
+            outdir
+        }
         .first()
-
-    def stripNii = { f ->
-        def n = f.getName()
-        n = n.replaceFirst(/\.nii\.gz$/, '')
-        n = n.replaceFirst(/\.nii$/, '')
-        return n
-    }
-
-    def normalizeDetectorImageName = { p ->
-        def n = p.getName()
-        n = n.replaceFirst(/\.deface_qc\.json$/, '')
-        n = n.replaceFirst(/\.json$/, '')
-        n = n.replaceFirst(/_defaced$/, '')
-        return n
-    }
-
-    def relFromSub = { p ->
-        def s = p.toString()
-        def parts = s.split(/[\\\/]+/)
-        def i = parts.findIndexOf { it.startsWith('sub-') }
-        if( i < 0 ) error "Could not derive rel path from: ${s}"
-        return parts[i..-1].join('/')
-    }
 
     qc_script      = file("${projectDir}/assets/scripts/deface_qc_render.py")
     metrics_script = file("${projectDir}/assets/scripts/deface_metrics.py")
@@ -122,13 +146,16 @@ workflow DEFACE_BENCHMARK {
     detector_script   = Channel.value(file("${projectDir}/assets/scripts/mri_deface_detector.mjs"))
     detector_modeldir = Channel.value(file("${projectDir}/assets/mri-deface-detector/model_js"))
 
-    // original T1w inputs only
+    // Original T1w inputs only
     ch_benchmark_in = ch_input
-        .map { meta, _ -> meta }
+        .map { meta, ignored -> meta }
         .combine(ch_bids_dataset_after_ignore)
         .flatMap { meta, ds ->
             def anatDir = new File(ds.toString(), "sub-${meta.subject}/ses-${meta.session}/anat")
-            if( !anatDir.exists() ) return []
+
+            if (!anatDir.exists()) {
+                return []
+            }
 
             def niiFiles = anatDir
                 .listFiles()
@@ -140,27 +167,30 @@ workflow DEFACE_BENCHMARK {
                 }
                 ?: []
 
-            niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
+            niiFiles.collect { f ->
+                tuple(meta, ds, f.toPath())
+            }
         }
 
-    // run all 4 defacers
+    // Run all 4 defacers
     PYDEFACE(ch_benchmark_in)
     MRI_DEFACE(ch_benchmark_in)
     FSL_DEFACE(ch_benchmark_in)
     AFNI_REFACER(ch_benchmark_in)
 
-    // originals keyed
+    // Originals keyed
     ch_orig_keyed = ch_benchmark_in
         .map { meta, ds, orig_nifti ->
             def key = "${meta.subject}|${meta.session}|${stripNii(orig_nifti)}"
             tuple(key, meta, orig_nifti)
         }
 
-    // defaced outputs keyed
+    // Defaced outputs keyed
     ch_pydeface_keyed = PYDEFACE.out.defaced
         .map { meta, defaced_nifti ->
             def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
             def key  = "${meta.subject}|${meta.session}|${base}"
+
             tuple(key, meta + [ deface_method: 'pydeface' ], 'pydeface', defaced_nifti)
         }
 
@@ -168,6 +198,7 @@ workflow DEFACE_BENCHMARK {
         .map { meta, defaced_nifti ->
             def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
             def key  = "${meta.subject}|${meta.session}|${base}"
+
             tuple(key, meta + [ deface_method: 'mri_deface' ], 'mri_deface', defaced_nifti)
         }
 
@@ -175,6 +206,7 @@ workflow DEFACE_BENCHMARK {
         .map { meta, defaced_nifti ->
             def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
             def key  = "${meta.subject}|${meta.session}|${base}"
+
             tuple(key, meta + [ deface_method: 'fsl_deface' ], 'fsl_deface', defaced_nifti)
         }
 
@@ -182,6 +214,7 @@ workflow DEFACE_BENCHMARK {
         .map { meta, defaced_nifti ->
             def base = stripNii(defaced_nifti).replaceFirst(/_defaced$/, '')
             def key  = "${meta.subject}|${meta.session}|${base}"
+
             tuple(key, meta + [ deface_method: 'afni_refacer' ], 'afni_refacer', defaced_nifti)
         }
 
@@ -219,7 +252,7 @@ workflow DEFACE_BENCHMARK {
 
     DEFACE_QC_RENDER(ch_deface_qc_in)
 
-    // metrics inputs per method, then mix
+    // Metrics inputs per method, then mix
     ch_deface_metrics_py = ch_orig_keyed
         .join(ch_pydeface_keyed)
         .map { key, meta_orig, orig_nifti, meta_def, method, defaced_nifti ->
@@ -253,13 +286,13 @@ workflow DEFACE_BENCHMARK {
 
     DEFACE_METRICS(ch_deface_metrics_in)
 
-    // metric manifest for merge
+    // Metric manifest for merge
     ch_metric_manifest = DEFACE_METRICS.out.metrics_publish
         .map { x -> x instanceof List ? x[-1] : x }
         .map { p -> p.toString() + '\n' }
         .collectFile(name: 'metric_files.txt', keepHeader: false, newLine: false)
 
-    // detector inputs per method
+    // Detector inputs per method
     ch_pydeface_t1w = PYDEFACE.out.defaced
         .filter { meta, f -> f.name ==~ /.*_T1w_defaced\.nii(\.gz)?$/ }
         .map { meta, f -> tuple(meta + [ deface_method: 'pydeface' ], f) }
@@ -285,7 +318,7 @@ workflow DEFACE_BENCHMARK {
 
     DEFACE_DETECTOR(ch_all_detector_in, detector_script, detector_modeldir)
 
-    // detector manifest with explicit metadata so merge can attach scores/pass to the right row
+    // Detector manifest with explicit metadata so merge can attach scores/pass to the right row
     ch_detector_manifest = DEFACE_DETECTOR.out.qc_json
         .map { meta, f ->
             def image_name = normalizeDetectorImageName(f)
@@ -297,7 +330,7 @@ workflow DEFACE_BENCHMARK {
 
     defacedet_out = DEFACE_DETECTOR.out.qc_json.join(DEFACE_DETECTOR.out.qc_pass)
 
-    // publish defaced files under method-specific subfolders
+    // Publish defaced files under method-specific subfolders
     ch_all_defaced_publish = Channel
         .empty()
         .mix(

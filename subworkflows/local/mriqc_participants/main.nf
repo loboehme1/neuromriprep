@@ -1,5 +1,26 @@
 include { MRIQC_PARTICIPANT } from '../../../modules/local/mriqcparticipant/'
 
+
+def readVpnLabels(vpnPath) {
+    if (!vpnPath) {
+        return [] as List
+    }
+
+    def f = file(vpnPath)
+
+    if (!f.exists()) {
+        throw new IllegalArgumentException("VPN file not found: ${vpnPath}")
+    }
+
+    return f.readLines()
+        .collect { line -> line.replace('\r', '').trim() }
+        .findAll { line -> line && !line.startsWith('#') }
+        .collectMany { line -> line.tokenize() }
+        .collect { label -> label.replaceFirst(/^sub-/, '') }
+        .unique()
+}
+
+
 workflow MRIQC_PARTICIPANTS {
 
     take:
@@ -8,24 +29,7 @@ workflow MRIQC_PARTICIPANTS {
 
     main:
 
-    def readVpnLabels = { vpnPath ->
-        if( !vpnPath )
-            return [] as List
-
-        def f = file(vpnPath)
-
-        if( !f.exists() )
-            error "VPN file not found: ${vpnPath}"
-
-        return f.readLines()
-            .collect { it.replace('\r','').trim() }
-            .findAll { it && !it.startsWith('#') }
-            .collectMany { it.tokenize() }
-            .collect { it.replaceFirst(/^sub-/, '') }
-            .unique()
-    }
-
-    def participant_labels = readVpnLabels(vpn_file)
+    participant_labels = readVpnLabels(vpn_file)
 
     /*
      * One dataset-level MRIQC participant call.

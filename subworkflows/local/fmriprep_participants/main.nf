@@ -22,7 +22,7 @@ workflow FMRIPREP_PARTICIPANTS {
 
     // per-subject/session meta channel
     ch_fmriprep_meta = ch_input
-        .map { meta, _ -> meta }
+        .map { meta, ignored -> meta }
         .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
 
     // optional VPN file restriction

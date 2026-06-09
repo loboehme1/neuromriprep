@@ -104,7 +104,7 @@ workflow NEUROMRIPREP {
     ch_bids_dataset_items = MERGE_BIDS_DATASET.out.bids_dataset_items.flatten()
 
     ch_dataset_meta = ch_samplesheet
-        .map { meta, _ -> meta }
+        .map { meta, ignored -> meta }
         .first()
         .map { meta -> meta + [ id: 'dataset' ] }
 
