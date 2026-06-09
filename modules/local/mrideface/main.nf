@@ -2,7 +2,7 @@ process MRI_DEFACE {
 
     tag "${meta.subject}_${meta.session}_${nifti.name}"
 
-    container { task.ext.container ?: params.mri_deface_container }
+    container { task.ext.container ?: '/home/loboehme/Documents/container/ownconts/mri_deface.sif' }
 
     cpus   { (params.mri_deface_cpus ?: 8) as Integer }
     memory {  params.mri_deface_mem  ?: '8 GB' }
