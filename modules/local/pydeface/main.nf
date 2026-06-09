@@ -9,11 +9,6 @@ process PYDEFACE {
     memory {  params.pydeface_mem  ?: '8 GB' }
     time   {  params.pydeface_time ?: '2h' }
 
-    /*
-    publishDir {
-        params.pydeface_outdir ?: "${params.outdir}/derivatives/pydeface"
-    }, mode: 'copy', overwrite: true
-    */
 
     input:
     tuple val(meta), path(bids_dir), path(nifti)
