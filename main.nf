@@ -52,7 +52,6 @@ workflow NFCORE_NEUROMRIPREP {
             ]
             [ meta, file(row.dicom_dir) ]
         }
-        //.view() # uncomment to print every samplesheet entry for debugging
 
     ch_config = Channel.fromPath(params.dcm2bids_config, checkIfExists: true)
 
@@ -63,8 +62,6 @@ workflow NFCORE_NEUROMRIPREP {
         ch_samplesheet,
         ch_config
     )
-
-    //NEUROMRIPREP.out.copied_dicoms.view { it }
 
     emit:
     dcm2bids_merge      = NEUROMRIPREP.out.dcm2bids_merge
@@ -120,45 +117,6 @@ workflow NFCORE_DEFACE_BENCHMARK {
 
 params.mode = params.mode ?: 'production'
 
-//workflow {
-
-    //main:
-    //
-    // SUBWORKFLOW: Run initialisation tasks
-    //
-    /*
-    PIPELINE_INITIALISATION (
-        params.version,
-        params.validate_params,
-        params.monochrome_logs,
-        args,
-        params.outdir,
-        params.input,
-        params.help,
-        params.help_full,
-        params.show_hidden
-    )
-    */
-
-    //
-    // WORKFLOW: Run main workflow
-    //
-    //NFCORE_NEUROMRIPREP ()
-
-    //
-    // SUBWORKFLOW: Run completion tasks
-    //
-    /*
-    PIPELINE_COMPLETION (
-        params.email,
-        params.email_on_fail,
-        params.plaintext_email,
-        params.outdir,
-        params.monochrome_logs,
-        params.hook_url,
-        NFCORE_NEUROMRIPREP.out.multiqc_report
-    )
-    */
 
 workflow {
 
@@ -226,7 +184,7 @@ workflow {
 }
 
 
-// output specified in correct way as in bash files
+// output specified in the way as in bash files
 
 output {
 
@@ -249,7 +207,7 @@ output {
         path { meta, f -> f >> f.name }
     }
 
-    // MRIQC participant output --> derivatives/mriqc
+    // MRIQC participant output -> derivatives/mriqc
     mriqc_part_out {
         path { x ->
             x.file >> "derivatives/mriqc/${x.rel}"   
@@ -257,7 +215,7 @@ output {
     }
 
 
-    // MRIQC group output --> derivatives/mriqc
+    // MRIQC group output -> derivatives/mriqc
     mriqc_group_out {
         path { x ->
             x.file >> "derivatives/mriqc/${x.rel}"  
@@ -265,14 +223,14 @@ output {
     }
 
 
-    // FMRIPREP output -->
+    // FMRIPREP output
     fmriprep_out {
         path { x ->
             x.file >> "derivatives/fmriprep/${x.rel}"   
         }
     }
 
-    // DEFACE output -->
+    // DEFACE output
     deface_out {
         path { x ->
             x.file >> "derivatives/defaces/${x.rel}"   
