@@ -18,5 +18,11 @@ assets/generate_session_config.py
 assets/target/
 assets/bash_files/
 assets/README_dcm2bids_config.md
+assets/samplesheets/
 
-
+assets/input_pipeline/
+assets/old_files/
+assets/commands.txt
+node_modules/
+package-lock.json
+package.json
