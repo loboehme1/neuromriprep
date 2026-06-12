@@ -3,9 +3,10 @@
     IMPORT MODULES
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { DCM2BIDS          } from '../../../modules/local/dcm2bids'
-include { DCM2BIDS_CONFIG   } from '../../../modules/local/dcm2bidsconfig'
-include { DCM2BIDS_POSTPROC } from '../../../modules/local/dcm2bidspostprocess'
+include { DCM2BIDS              } from '../../../modules/local/dcm2bids'
+include { DCM2BIDS_CONFIG       } from '../../../modules/local/dcm2bidsconfig'
+include { DCM2BIDS_OUTPUT_PATCH } from '../../../modules/local/dcm2bidsoutputpatch'
+include { DCM2BIDS_POSTPROC     } from '../../../modules/local/dcm2bidspostprocess'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -35,6 +36,8 @@ workflow BIDSING {
 
     ch_modified_cfg = DCM2BIDS_CONFIG.out.config
 
+
+
     /*
      * Step 2: run dcm2bids
      * join output shape here is: [meta, dicom_dir, modified_config]
@@ -53,9 +56,32 @@ workflow BIDSING {
     ch_bids_raw = DCM2BIDS.out.bids_output
 
     /*
-     * Step 3: postprocess BIDS output
+     * Step 3.1: patch output for selective patients
      */
-    DCM2BIDS_POSTPROC(ch_bids_raw)
+    
+    if (params.dcm2bids_output_patch_vpn) {
+
+    ch_b0field_patch_vpn = Channel.value(
+        file(params.dcm2bids_output_patch_vpn, checkIfExists: true)
+    )
+
+    DCM2BIDS_OUTPUT_PATCH(
+        ch_bids_raw,
+        ch_b0field_patch_vpn
+    )
+
+    ch_bids_for_postproc = DCM2BIDS_OUTPUT_PATCH.out.bids_output
+
+    } else {
+
+        ch_bids_for_postproc = ch_bids_raw
+    }
+
+    /*
+     * Step 3.2: postprocess BIDS output
+     */
+    
+    DCM2BIDS_POSTPROC(ch_bids_for_postproc)
 
     emit:
     bids_raw         = ch_bids_raw

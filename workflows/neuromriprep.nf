@@ -18,7 +18,6 @@ include { PYDEFACE           } from '../modules/local/pydeface'
 include { MRI_DEFACE         } from '../modules/local/mrideface'
 include { FSL_DEFACE         } from '../modules/local/fsldeface'
 include { AFNI_REFACER       } from '../modules/local/afnirefacer'
-include { DEEPDEFACER        } from '../modules/local/deepdefacer'
 
 
 /*
@@ -81,6 +80,8 @@ workflow NEUROMRIPREP {
 
     ch_bids_raw  = BIDSING.out.bids_raw
     ch_versions  = BIDSING.out.versions
+
+    ch_modified_cfg = BIDSING.out.modified_config
 
     ch_sub_dirs = BIDSING.out.bids_sub
         .map { meta, subdir -> subdir }
@@ -416,6 +417,7 @@ workflow NEUROMRIPREP {
 
     emit:
     dcm2bids_merge      = ch_bids_dataset_items
+    modified_config     = ch_modified_cfg
     bidsgate_report     = ch_bidsqcgate
     bidsval_report      = ch_bidsval_log
     bidsignore_file     = ch_bidsignore

@@ -65,6 +65,7 @@ workflow NFCORE_NEUROMRIPREP {
 
     emit:
     dcm2bids_merge      = NEUROMRIPREP.out.dcm2bids_merge
+    modified_config     = NEUROMRIPREP.out.modified_config
     bidsgate_report     = NEUROMRIPREP.out.bidsgate_report
     bidsval_report      = NEUROMRIPREP.out.bidsval_report
     bidsignore_file     = NEUROMRIPREP.out.bidsignore_file
@@ -124,6 +125,7 @@ workflow {
 
     // initialize everything as empty
     merge_out             = Channel.empty()
+    config_out            = Channel.empty()
     bidsqc_out            = Channel.empty()
     bidsignore_out        = Channel.empty()
     bidsval_out           = Channel.empty()
@@ -143,6 +145,7 @@ workflow {
         NFCORE_NEUROMRIPREP()
 
         merge_out      = NFCORE_NEUROMRIPREP.out.dcm2bids_merge
+        config_out     = NFCORE_NEUROMRIPREP.out.modified_config
         bidsqc_out     = NFCORE_NEUROMRIPREP.out.bidsgate_report
         bidsval_out    = NFCORE_NEUROMRIPREP.out.bidsval_report
         bidsignore_out = NFCORE_NEUROMRIPREP.out.bidsignore_file
@@ -166,6 +169,7 @@ workflow {
 
     publish:
     merge_out             = merge_out
+    config_out            = config_out
     bidsqc_out            = bidsqc_out
     bidsval_out           = bidsval_out
     bidsignore_out        = bidsignore_out
@@ -191,6 +195,11 @@ output {
     // BIDS output
     merge_out {
         path { f -> f >> f.name }
+    }
+
+    // publish modified config
+    config_out {
+        path { meta, f -> f >> f.name }
     }
 
     // BIDSGATE
