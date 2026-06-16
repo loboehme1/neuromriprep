@@ -1,0 +1,8 @@
+Jun-16 16:15:50.957 [main] INFO  com.askimed.nf.test.App - nf-test 0.9.3
+Jun-16 16:15:50.996 [main] INFO  com.askimed.nf.test.App - Arguments: [test, modules/local/pydeface/tests/main.nf.test]
+Jun-16 16:15:53.608 [main] INFO  com.askimed.nf.test.App - Nextflow Version: 25.10.0
+Jun-16 16:15:53.618 [main] WARN  com.askimed.nf.test.commands.RunTestsCommand - No nf-test config file found.
+Jun-16 16:15:53.642 [main] INFO  com.askimed.nf.test.lang.dependencies.DependencyResolver - Loaded 1 files from directory /home/lorena/neuromriprep/neuromriprep/tests in 0.017 sec
+Jun-16 16:15:53.646 [main] INFO  com.askimed.nf.test.lang.dependencies.DependencyResolver - Found 0 files containing tests.
+Jun-16 16:15:53.647 [main] DEBUG com.askimed.nf.test.lang.dependencies.DependencyResolver - Found files: []
+Jun-16 16:15:53.657 [main] INFO  com.askimed.nf.test.commands.RunTestsCommand - Found 0 tests to execute.

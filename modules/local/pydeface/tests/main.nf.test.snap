@@ -1,0 +1,27 @@
+{
+    "pydeface_outputs": {
+        "content": [
+            {
+                "meta": {
+                    "subject": "01",
+                    "session": "006"
+                },
+                "defaced": [
+                    "ds000031_sub-01_ses-006_run-001_T1w_defaced.nii.gz"
+                ],
+                "defaced_publish": [
+                    "ds000031_sub-01_ses-006_run-001_T1w_defaced.nii.gz"
+                ],
+                "logs": [
+                    "sub-01_ses-006_ds000031_sub-01_ses-006_run-001_T1w_err.log",
+                    "sub-01_ses-006_ds000031_sub-01_ses-006_run-001_T1w_out.log"
+                ]
+            }
+        ],
+        "meta": {
+            "nf-test": "0.9.3",
+            "nextflow": "25.10.0"
+        },
+        "timestamp": "2026-06-16T14:14:42.100992005"
+    }
+}

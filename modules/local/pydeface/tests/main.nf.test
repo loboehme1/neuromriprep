@@ -4,7 +4,7 @@
 nextflow_process {
 
     name "Test Process PYDEFACE"
-    script "../../../../modules/local/pydeface.nf"
+    script "../main.nf"
     process "PYDEFACE"
 
     tag "modules"
@@ -13,32 +13,31 @@ nextflow_process {
 
     test("single T1w nifti creates defaces image and logs") {
 
-        def jsonFile  = /home/loboehme/Documents/test_data/pydeface/ds000031_sub-01_ses-006_run-001_T1w.json
-        def niftiFile = /home/loboehme/Documents/test_data/pydeface/ds000031_sub-01_ses-006_run-001_T1w.nii.gz
 
         when {
             process {
                 """
                 input[0] = [
                     [ subject:'01', session: '006'],
-                    file('/home/loboehme/Documents/test_data/pydeface/ds000031_sub-01_ses-006_run-001_T1w.json'),
-                    file('/home/loboehme/Documents/test_data/pydeface/ds000031_sub-01_ses-006_run-001_T1w.nii.gz')
+                    file(params.pydeface_test_data, checkIfExists: true),
+                    file(params.pydeface_test_data + '/ds000031_sub-01_ses-006_run-001_T1w.nii.gz', checkIfExists: true)
                 ]
                 """
             }
         }
 
         then {
+
             // check if test case succeeded
             assert process.success
+            assert process.trace.tasks().size() == 1
 
             // exactly one file per input nifti for normal output and publish output
             assert process.out.defaced.size() == 1
             assert process.out.defaced_publish.size() >= 1
 
-            // exactly one log file per run
+            // logs should exist
             assert process.out.logs.size() >= 1
-
 
             // helper functions
             def asList = { x ->
@@ -49,35 +48,56 @@ nextflow_process {
                 xs.collectMany { it instanceof Collection ? it as List : [it] }
             }
 
-            // get all module outputs: meta from defaced, defaced from defaced, defaced from publish, logs from logs
+            def basename = { x ->
+                new File(x.toString()).name
+            }
+
+            def exists = { x ->
+                new File(x.toString()).exists()
+            }
+
+            def fileSize = { x ->
+                new File(x.toString()).length()
+            }
+
+            // get all module outputs
             def meta = process.out.defaced[0][0]
             def defacedFiles = asList(process.out.defaced[0][1])
             def publishFiles = flatten(process.out.defaced_publish)
             def logFiles = flatten(process.out.logs)
 
-
-            // check meta data --> we know the session and subject as specified by input
+            // check meta data
             assert meta.subject == '01'
             assert meta.session == '006'
 
-            // defaced output check: number of files, name, exists
+            // defaced output check
             assert defacedFiles.size() == 1
-            assert defacedFiles[0].name == 'ds000031_sub-01_ses-006_run-001_T1w_defaced.nii.gz'
-            assert new File(defacedFiles[0].toString()).exists()
-            assert new File(defacedFiles[0].toString()).length() > 0
+            assert basename(defacedFiles[0]) == 'ds000031_sub-01_ses-006_run-001_T1w_defaced.nii.gz'
+            assert exists(defacedFiles[0])
+            assert fileSize(defacedFiles[0]) > 0
 
-            // publish output check: name
-            assert publishFiles*.name.contains('ds000031_sub-01_ses-006_run-001_T1w_defaced.nii.gz')
+            // publish output check
+            assert publishFiles.collect { basename(it) }.contains('ds000031_sub-01_ses-006_run-001_T1w_defaced.nii.gz')
 
-            // logs check: error lo, normal log, names, exists
-            assert logFiles*.name.sort() == [
+            // logs check
+            assert logFiles.collect { basename(it) }.sort() == [
                 'sub-01_ses-006_ds000031_sub-01_ses-006_run-001_T1w_err.log',
                 'sub-01_ses-006_ds000031_sub-01_ses-006_run-001_T1w_out.log'
             ]
 
-            assert logFiles.every { new File(it.toString()).exists() }
+            assert logFiles.every { exists(it) }
+
+            assert snapshot(
+                [
+                    meta: [
+                        subject: meta.subject,
+                        session: meta.session
+                    ],
+                    defaced: defacedFiles.collect { basename(it) }.sort(),
+                    defaced_publish: publishFiles.collect { basename(it) }.sort(),
+                    logs: logFiles.collect { basename(it) }.sort()
+                ]
+            ).match("pydeface_outputs")
         }
-
     }
-
 }
