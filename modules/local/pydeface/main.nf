@@ -2,8 +2,7 @@ process PYDEFACE {
 
     tag "${meta.subject}_${meta.session}_${nifti.name}"
 
-    // use your new container
-    container { task.ext.container ?: '/home/loboehme/Documents/container/ownconts/pydeface.sif' }
+    container { task.ext.container ?: '/nic/sw/IRTG/sif/pydeface_3.0.sif' }
 
     cpus   { (params.pydeface_cpus ?: 8) as Integer }
     memory {  params.pydeface_mem  ?: '8 GB' }
@@ -49,7 +48,7 @@ process PYDEFACE {
       echo
     } | tee -a "$out_log"
 
-    # Skip if input already looks defaced --> does this work?
+    # Skip if input already looks defaced
     if [[ "$base" == *"_defaced" ]]; then
       echo "[SKIP] Input already looks defaced: $base" | tee -a "$out_log"
       cp "!{nifti}" "$out_file"
