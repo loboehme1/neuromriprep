@@ -9,15 +9,15 @@ include { BIDS_VALIDATOR     } from '../modules/local/bidsvalidator'
 include { BIDS_QC_GATE       } from '../modules/local/bidsqcgate'
 include { BIDSIGNORE         } from '../modules/local/bidsignore'
 
+include { MAKE_DEFACED_BIDS             } from '../modules/local/makedefacedbids'
+include { DEFACING as DEFACING_FIRST  } from '../subworkflows/local/defacing'
+
 include { MRIQC_PARTICIPANTS } from '../subworkflows/local/mriqc_participants'
 include { MRIQC_GROUP        } from '../modules/local/mriqcgroup'
 
 include { FMRIPREP_PARTICIPANTS } from '../subworkflows/local/fmriprep_participants'
 
-include { PYDEFACE           } from '../modules/local/pydeface'
-include { MRI_DEFACE         } from '../modules/local/mrideface'
-include { FSL_DEFACE         } from '../modules/local/fsldeface'
-include { AFNI_REFACER       } from '../modules/local/afnirefacer'
+include { DEFACING as DEFACING_LATE  } from '../subworkflows/local/defacing'
 
 
 /*
@@ -205,10 +205,39 @@ workflow NEUROMRIPREP {
 
     } else {
 
+        def ch_bids_dataset_for_analysis = ch_bids_dataset_for_downstream
+
+        if( params.deface_first ) {
+
+            log.warn "[DEFACE] --deface_first true: running ${params.deface_tool} before MRIQC/fMRIPREP."
+
+            DEFACING_FIRST(
+                ch_input,
+                ch_bids_dataset_for_downstream
+            )
+
+            ch_defaced = DEFACING_FIRST.out.defaced
+            ch_deface_publish = DEFACING_FIRST.out.deface_publish
+
+            def ch_make_defaced_bids_in = ch_dataset_meta
+                .combine(ch_bids_dataset_for_downstream)
+                .combine(DEFACING_FIRST.out.defaced_files)
+                .map { meta, ds, files -> tuple(meta, ds, files) }
+
+            MAKE_DEFACED_BIDS(ch_make_defaced_bids_in)
+
+            ch_bids_dataset_for_analysis = MAKE_DEFACED_BIDS.out.bids_dataset
+                .map { meta, ds -> ds }
+
+        } else {
+
+            log.warn "[DEFACE] --deface_first false: MRIQC/fMRIPREP use the original BIDS dataset; defacing runs after FMRIPREP."
+        }
+
         // MRIQC is dataset-level, matching the original bash scripts.
         // It runs once on the merged BIDS dataset, optionally restricted by --participant-label.
         ch_mriqc_dataset_in = ch_dataset_meta
-            .combine(ch_bids_dataset_for_downstream)
+            .combine(ch_bids_dataset_for_analysis)
             .map { meta, ds -> tuple(meta, ds) }
 
 
@@ -276,7 +305,7 @@ workflow NEUROMRIPREP {
 
                 FMRIPREP_PARTICIPANTS(
                     ch_input,
-                    ch_bids_dataset_for_downstream
+                    ch_bids_dataset_for_analysis
                 )
 
                 ch_fmriprep_publish = FMRIPREP_PARTICIPANTS.out.fmriprep_publish
@@ -288,130 +317,20 @@ workflow NEUROMRIPREP {
         }
 
         //
-        // DEFACING (run if not explicitly stopped after FMRIPREP)
+        // DEFACING after FMRIPREP
+        // Only runs when --deface_first false.
         //
-        if( !params.stop_fmriprep || params.skip_fmriprep ) {
+        if( !params.deface_first && (!params.stop_fmriprep || params.skip_fmriprep) ) {
 
-            // Dataset dir (single value, possibly gated)
-            def ch_deface_ds = ch_bids_dataset_for_downstream
+            log.warn "[DEFACE] Running ${params.deface_tool} after FMRIPREP."
 
-            // Per-subject/session meta
-            def ch_deface_meta = ch_input
-                .map { meta, ignored -> meta }
-                .map { meta -> meta + [ id: "sub-${meta.subject}" ] }
+            DEFACING_LATE(
+                ch_input,
+                ch_bids_dataset_for_downstream
+            )
 
-            // VPN list
-            if( params.pydeface_vpn_file ) {
-                def vpn_set = file(params.pydeface_vpn_file)
-                    .text
-                    .readLines()
-                    .collect { it.replace('\r','').trim() }
-                    .findAll { it }
-                    .collect { it.replaceFirst(/^sub-/, '') }
-                    .toSet()
-
-                ch_deface_meta = ch_deface_meta.filter { meta ->
-                    vpn_set.contains(meta.subject.toString().replaceFirst(/^sub-/, ''))
-                }
-            }
-
-            def ch_deface_in = ch_deface_meta
-                .combine(ch_deface_ds)
-                .flatMap { meta, ds ->
-                    def anatDir = new File(ds.toString(), "sub-${meta.subject}/ses-${meta.session}/anat")
-                    if( !anatDir.exists() ) return []
-
-                    def niiFiles = anatDir
-                        .listFiles()
-                        ?.findAll { it.name.endsWith('.nii.gz') && !it.name.endsWith('_defaced.nii.gz') }
-                        ?: []
-
-                    niiFiles.collect { f -> tuple(meta, ds, f.toPath()) }
-                }
-
-            if( params.deface_tool == 'mri_deface' ) {
-
-                MRI_DEFACE(ch_deface_in)
-                ch_defaced = MRI_DEFACE.out.defaced
-
-                ch_deface_publish = MRI_DEFACE.out.defaced_publish
-                    .flatten()
-                    .map { p ->
-                        def s = p.toString()
-                        def parts = s.split(/[\\\/]+/)
-                        def i = parts.findIndexOf { it.startsWith('sub-') }
-                        if( i < 0 ) error "Could not derive rel path from: ${s}"
-                        def rel = parts[i..-1].join('/')
-                        [ file: p, rel: rel ]
-                    }
-
-            } else if( params.deface_tool == 'pydeface' ) {
-
-                PYDEFACE(ch_deface_in)
-                ch_defaced = PYDEFACE.out.defaced
-
-                ch_deface_publish = PYDEFACE.out.defaced_publish
-                    .flatten()
-                    .map { p ->
-                        def s = p.toString()
-                        def parts = s.split(/[\\\/]+/)
-                        def i = parts.findIndexOf { it.startsWith('sub-') }
-                        if( i < 0 ) error "Could not derive rel path from: ${s}"
-                        def rel = parts[i..-1].join('/')
-                        [ file: p, rel: rel ]
-                    }
-
-            } else if( params.deface_tool == 'fsl_deface' ) {
-
-                FSL_DEFACE(ch_deface_in)
-                ch_defaced = FSL_DEFACE.out.defaced
-
-                ch_deface_publish = FSL_DEFACE.out.defaced_publish
-                    .flatten()
-                    .map { p ->
-                        def s = p.toString()
-                        def parts = s.split(/[\\\/]+/)
-                        def i = parts.findIndexOf { it.startsWith('sub-') }
-                        if( i < 0 ) error "Could not derive rel path from: ${s}"
-                        def rel = parts[i..-1].join('/')
-                        [ file: p, rel: rel ]
-                    }
-
-            } else if( params.deface_tool == 'afni_refacer' ) {
-
-                AFNI_REFACER(ch_deface_in)
-                ch_defaced = AFNI_REFACER.out.defaced
-
-                ch_deface_publish = AFNI_REFACER.out.defaced_publish
-                    .flatten()
-                    .map { p ->
-                        def s = p.toString()
-                        def parts = s.split(/[\\\/]+/)
-                        def i = parts.findIndexOf { it.startsWith('sub-') }
-                        if( i < 0 ) error "Could not derive rel path from: ${s}"
-                        def rel = parts[i..-1].join('/')
-                        [ file: p, rel: rel ]
-                    }
-
-            } else if( params.deface_tool == 'deepdefacer' ) {
-
-                DEEPDEFACER(ch_deface_in)
-                ch_defaced = DEEPDEFACER.out.defaced
-
-                ch_deface_publish = DEEPDEFACER.out.defaced_publish
-                    .flatten()
-                    .map { p ->
-                        def s = p.toString()
-                        def parts = s.split(/[\\\/]+/)
-                        def i = parts.findIndexOf { it.startsWith('sub-') }
-                        if( i < 0 ) error "Could not derive rel path from: ${s}"
-                        def rel = parts[i..-1].join('/')
-                        [ file: p, rel: rel ]
-                    }
-
-            } else {
-                error "Unsupported params.deface_tool: ${params.deface_tool}"
-            }
+            ch_defaced = DEFACING_LATE.out.defaced
+            ch_deface_publish = DEFACING_LATE.out.deface_publish
         }
     }
 
