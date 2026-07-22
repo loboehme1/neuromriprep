@@ -42,11 +42,22 @@ process DCM2BIDS {
         -o . \\
         ${force_flag} ${args} 2>&1 | tee logs_dcm2bids/${prefix}_dcm2bids.log
 
-    # Generate versions file
+    dcm2bids_version=\$(python - <<'PY'
+    from dcm2bids.version import __version__
+    print(__version__)
+    PY
+    )
+
+    if command -v jq >/dev/null 2>&1; then
+        jq_version=\$(jq --version | sed 's/^jq-//')
+    else
+        jq_version="not-installed"
+    fi
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        dcm2bids: \$(dcm2bids --version 2>&1 | grep -oP 'dcm2bids \\K[0-9.]+' || echo "unknown")
-        jq: \$(jq --version 2>&1 | grep -oP 'jq-\\K[0-9.]+' || echo "unknown")
+    dcm2bids: "\${dcm2bids_version}"
+    jq: "\${jq_version}"
     END_VERSIONS
     """
 }

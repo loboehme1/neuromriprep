@@ -3,7 +3,7 @@ process BIDS_VALIDATOR {
     tag "${meta.id}"
     label 'process_low'
 
-    container "${ task.ext.container ?: '/home/loboehme/Documents/container/ownconts/bidsvalidator_bash.sif' }"
+    container "${ task.ext.container ?: '/nic/sw/IRTG/sif/bidsvalidator_bash.sif' }"
 
     input:
     tuple val(meta), path(input_dir), path(bidsignore_file, stageAs: 'incoming_bidsignore.txt')
@@ -48,17 +48,23 @@ process BIDS_VALIDATOR {
     log_path="\$(pwd)/${prefix}_validation_log.txt"
 
     cat > ${prefix}_validation_summary.txt <<EOF
-dataset_dir=${input_dir}
-log_path=\${log_path}
-exit_code=\${status}
-errors=\${errors}
-warnings=\${warns}
-EOF
+    dataset_dir=${input_dir}
+    log_path=\${log_path}
+    exit_code=\${status}
+    errors=\${errors}
+    warnings=\${warns}
+    EOF
+
+    bids_validator_version=\$(
+        bids-validator --version 2>&1 |
+        sed "s/\$(printf '\\033')\\[[0-9;]*m//g" |
+        awk '{ print \$NF }'
+    )
 
     cat <<-END_VERSIONS > versions.yml
-"${task.process}":
-  bids-validator: \$(bids-validator --version 2>/dev/null | sed 's/bids-validator v//g' || echo "unknown")
-END_VERSIONS
+    "${task.process}":
+    bids-validator: "\${bids_validator_version}"
+    END_VERSIONS
 
     exit 0
     """

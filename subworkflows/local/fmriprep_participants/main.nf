@@ -73,6 +73,7 @@ workflow FMRIPREP_PARTICIPANTS {
 
     // reshape publish output
     ch_fmriprep_pub = FMRIPREP.out.fmriprep_publish.flatten()
+    ch_fmriprep_version = FMRIPREP.out.versions
 
     ch_fmriprep_publish = ch_fmriprep_pub.map { p ->
         def rel = p.toString().replaceFirst(/^.*[\\\/]fmriprep_out_[^\/]+\//, '')
@@ -81,6 +82,7 @@ workflow FMRIPREP_PARTICIPANTS {
 
     emit:
     fmriprep_publish = ch_fmriprep_publish
+    fmriprep_versions = ch_fmriprep_version
 }
 
 

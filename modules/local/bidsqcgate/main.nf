@@ -7,7 +7,7 @@ process BIDS_QC_GATE {
   stageInMode 'copy'
 
 
-  container { task.ext.container ?: '/home/loboehme/Documents/container/ownconts/python_3.11.14-trixie.sif' }
+  container { task.ext.container ?: '/nic/sw/IRTG/sif/python_3.11.14-trixie.sif' }
 
   input:
   tuple val(meta), path(bids_log), path(gate_py), path(warnings_ok), path(helpers)

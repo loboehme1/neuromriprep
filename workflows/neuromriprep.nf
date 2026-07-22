@@ -41,6 +41,9 @@ workflow NEUROMRIPREP {
 
     main:
 
+    // Aggregate version records from every component
+    def ch_versions = Channel.empty()
+
     // Default: enforce the gate unless explicitly disabled
     def enforce_bidsqc_gate = params.enforce_bidsqc_gate == null ? true : params.enforce_bidsqc_gate
 
@@ -78,8 +81,8 @@ workflow NEUROMRIPREP {
         ch_force
     )
 
-    ch_bids_raw  = BIDSING.out.bids_raw
-    ch_versions  = BIDSING.out.versions
+    ch_bids_raw = BIDSING.out.bids_raw
+    ch_versions = ch_versions.mix(BIDSING.out.versions)
 
     ch_modified_cfg = BIDSING.out.modified_config
 
@@ -132,6 +135,8 @@ workflow NEUROMRIPREP {
     // bidsvalidator
     BIDS_VALIDATOR(ch_bidsval_in)
 
+    ch_versions = ch_versions.mix(BIDS_VALIDATOR.out.versions)
+
     ch_bidsval_log = BIDS_VALIDATOR.out.log
 
     def gate_py   = file(params.bids_qc_script)
@@ -155,6 +160,7 @@ workflow NEUROMRIPREP {
     }
 
     BIDS_QC_GATE(ch_bidsval_gate)
+
 
     ch_bidsqcgate = BIDS_QC_GATE.out.summary
 
@@ -231,6 +237,8 @@ workflow NEUROMRIPREP {
                 params.mriqc_vpn_file
             )
 
+            ch_versions = ch_versions.mix(MRIQC_PARTICIPANTS.out.versions)
+
             // Publish participant-level MRIQC outputs
             ch_mriqc_part_pub = MRIQC_PARTICIPANTS.out.mriqc_out_pub.flatten()
 
@@ -250,6 +258,8 @@ workflow NEUROMRIPREP {
             MRIQC_GROUP(
                 MRIQC_PARTICIPANTS.out.mriqc_group_in
             )
+
+            ch_versions = ch_versions.mix(MRIQC_GROUP.out.versions)
 
             ch_mriqc_group_publish = MRIQC_GROUP.out.mriqc_group_publish.flatten()
 
@@ -278,6 +288,8 @@ workflow NEUROMRIPREP {
                     ch_input,
                     ch_bids_dataset_for_downstream
                 )
+
+                ch_versions = ch_versions.mix(FMRIPREP_PARTICIPANTS.out.fmriprep_versions)
 
                 ch_fmriprep_publish = FMRIPREP_PARTICIPANTS.out.fmriprep_publish
 
@@ -332,6 +344,7 @@ workflow NEUROMRIPREP {
             if( params.deface_tool == 'mri_deface' ) {
 
                 MRI_DEFACE(ch_deface_in)
+                //ch_versions = ch_versions.mix(MRI_DEFACE.out.version)
                 ch_defaced = MRI_DEFACE.out.defaced
 
                 ch_deface_publish = MRI_DEFACE.out.defaced_publish
@@ -348,6 +361,7 @@ workflow NEUROMRIPREP {
             } else if( params.deface_tool == 'pydeface' ) {
 
                 PYDEFACE(ch_deface_in)
+                ch_versions = ch_versions.mix(PYDEFACE.out.version)
                 ch_defaced = PYDEFACE.out.defaced
 
                 ch_deface_publish = PYDEFACE.out.defaced_publish
@@ -364,6 +378,7 @@ workflow NEUROMRIPREP {
             } else if( params.deface_tool == 'fsl_deface' ) {
 
                 FSL_DEFACE(ch_deface_in)
+                //ch_versions = ch_versions.mix(FSL_DEFACE.out.version)
                 ch_defaced = FSL_DEFACE.out.defaced
 
                 ch_deface_publish = FSL_DEFACE.out.defaced_publish
@@ -380,6 +395,7 @@ workflow NEUROMRIPREP {
             } else if( params.deface_tool == 'afni_refacer' ) {
 
                 AFNI_REFACER(ch_deface_in)
+                //ch_versions = ch_versions.mix(AFNI_REFACER.out.version)
                 ch_defaced = AFNI_REFACER.out.defaced
 
                 ch_deface_publish = AFNI_REFACER.out.defaced_publish
@@ -393,23 +409,7 @@ workflow NEUROMRIPREP {
                         [ file: p, rel: rel ]
                     }
 
-            } else if( params.deface_tool == 'deepdefacer' ) {
-
-                DEEPDEFACER(ch_deface_in)
-                ch_defaced = DEEPDEFACER.out.defaced
-
-                ch_deface_publish = DEEPDEFACER.out.defaced_publish
-                    .flatten()
-                    .map { p ->
-                        def s = p.toString()
-                        def parts = s.split(/[\\\/]+/)
-                        def i = parts.findIndexOf { it.startsWith('sub-') }
-                        if( i < 0 ) error "Could not derive rel path from: ${s}"
-                        def rel = parts[i..-1].join('/')
-                        [ file: p, rel: rel ]
-                    }
-
-            } else {
+            }  else {
                 error "Unsupported params.deface_tool: ${params.deface_tool}"
             }
         }
